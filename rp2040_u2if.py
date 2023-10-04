@@ -130,7 +130,15 @@ class RP2040_u2if:
         if RP2040_U2IF_RESET_DELAY >= 0:
             self._reset()
         self._opened = True
-
+    
+    def close(self):
+        """Close HID interface."""
+        if not self._opened:
+            return
+        self._hid_xfer(bytes([self.SYS_RESET]), True)
+        self._hid.close()
+        self._opened = False
+    
     # ----------------------------------------------------------------
     # GPIO
     # ----------------------------------------------------------------
