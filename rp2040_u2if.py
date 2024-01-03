@@ -97,7 +97,9 @@ class RP2040_u2if:
         self._hid.write(b"\0" + report + b"\0" * (64 - len(report)))
         if response:
             # return is 64 byte response report
-            return self._hid.read(64)
+            ret = self._hid.read(64, timeout_ms=1000) # Sometimes this can hang, but if we time out the call, it will work on the next call
+            assert len(ret) == 64, "HID Timeout occurred."
+            return ret
         return None
 
     def _reset(self):
