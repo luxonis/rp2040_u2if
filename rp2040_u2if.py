@@ -109,7 +109,7 @@ class RP2040_u2if:
         start = time.monotonic()
         while time.monotonic() - start < 5:
             try:
-                self._hid.open(self._vid, self._pid)
+                self._hid.open(self._vid, self._pid, self._serial)
             except OSError:
                 time.sleep(0.1)
                 continue
