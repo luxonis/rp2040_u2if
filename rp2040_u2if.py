@@ -471,7 +471,7 @@ class RP2040_u2if:
     def pwm_configure(self, pin, frequency=500, duty_cycle=0, variable_frequency=False):
         """Configure PWM."""
         self.pwm_deinit(pin)
-        resp = self._hid_xfer(bytes([self.PWM_INIT_PIN, pin.id]), True)
+        resp = self._hid_xfer(bytes([self.PWM_INIT_PIN, pin]), True)
         if resp[1] != self.RESP_OK:
             raise RuntimeError("PWM init error.")
 
@@ -480,11 +480,11 @@ class RP2040_u2if:
 
     def pwm_deinit(self, pin):
         """Deinit PWM."""
-        self._hid_xfer(bytes([self.PWM_DEINIT_PIN, pin.id]))
+        self._hid_xfer(bytes([self.PWM_DEINIT_PIN, pin]))
 
     def pwm_get_frequency(self, pin):
         """PWM get freq."""
-        resp = self._hid_xfer(bytes([self.PWM_GET_FREQ, pin.id]), True)
+        resp = self._hid_xfer(bytes([self.PWM_GET_FREQ, pin]), True)
         if resp[1] != self.RESP_OK:
             raise RuntimeError("PWM get frequency error.")
         return int.from_bytes(resp[3 : 3 + 4], byteorder="little")
@@ -492,7 +492,7 @@ class RP2040_u2if:
     def pwm_set_frequency(self, pin, frequency):
         """PWM set freq."""
         resp = self._hid_xfer(
-            bytes([self.PWM_SET_FREQ, pin.id])
+            bytes([self.PWM_SET_FREQ, pin])
             + frequency.to_bytes(4, byteorder="little"),
             True,
         )
@@ -509,7 +509,7 @@ class RP2040_u2if:
 
     def pwm_get_duty_cycle(self, pin):
         """PWM get duty cycle."""
-        resp = self._hid_xfer(bytes([self.PWM_GET_DUTY_U16, pin.id]), True)
+        resp = self._hid_xfer(bytes([self.PWM_GET_DUTY_U16, pin]), True)
         if resp[1] != self.RESP_OK:
             raise RuntimeError("PWM get duty cycle error.")
         return int.from_bytes(resp[3 : 3 + 4], byteorder="little")
@@ -517,7 +517,7 @@ class RP2040_u2if:
     def pwm_set_duty_cycle(self, pin, duty_cycle):
         """PWM set duty cycle."""
         resp = self._hid_xfer(
-            bytes([self.PWM_SET_DUTY_U16, pin.id])
+            bytes([self.PWM_SET_DUTY_U16, pin])
             + duty_cycle.to_bytes(2, byteorder="little"),
             True,
         )
