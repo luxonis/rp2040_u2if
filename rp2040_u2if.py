@@ -468,31 +468,31 @@ class RP2040_u2if:
     # PWM
     # ----------------------------------------------------------------
     # pylint: disable=unused-argument
-    def pwm_configure(self, pin, frequency=500, duty_cycle=0, variable_frequency=False):
+    def pwm_configure(self, pin_id: int, frequency=500, duty_cycle=0, variable_frequency=False):
         """Configure PWM."""
-        self.pwm_deinit(pin)
-        resp = self._hid_xfer(bytes([self.PWM_INIT_PIN, pin.id]), True)
+        self.pwm_deinit(pin_id)
+        resp = self._hid_xfer(bytes([self.PWM_INIT_PIN, pin_id]), True)
         if resp[1] != self.RESP_OK:
             raise RuntimeError("PWM init error.")
 
-        self.pwm_set_frequency(pin, frequency)
-        self.pwm_set_duty_cycle(pin, duty_cycle)
+        self.pwm_set_frequency(pin_id, frequency)
+        self.pwm_set_duty_cycle(pin_id, duty_cycle)
 
-    def pwm_deinit(self, pin):
+    def pwm_deinit(self, pin_id: int):
         """Deinit PWM."""
-        self._hid_xfer(bytes([self.PWM_DEINIT_PIN, pin.id]))
+        self._hid_xfer(bytes([self.PWM_DEINIT_PIN, pin_id]))
 
-    def pwm_get_frequency(self, pin):
+    def pwm_get_frequency(self, pin_id: int):
         """PWM get freq."""
-        resp = self._hid_xfer(bytes([self.PWM_GET_FREQ, pin.id]), True)
+        resp = self._hid_xfer(bytes([self.PWM_GET_FREQ, pin_id]), True)
         if resp[1] != self.RESP_OK:
             raise RuntimeError("PWM get frequency error.")
         return int.from_bytes(resp[3 : 3 + 4], byteorder="little")
 
-    def pwm_set_frequency(self, pin, frequency):
+    def pwm_set_frequency(self, pin_id: int, frequency):
         """PWM set freq."""
         resp = self._hid_xfer(
-            bytes([self.PWM_SET_FREQ, pin.id])
+            bytes([self.PWM_SET_FREQ, pin_id])
             + frequency.to_bytes(4, byteorder="little"),
             True,
         )
@@ -507,17 +507,17 @@ class RP2040_u2if:
             else:
                 raise RuntimeError("PWM frequency error.")
 
-    def pwm_get_duty_cycle(self, pin):
+    def pwm_get_duty_cycle(self, pin_id: int):
         """PWM get duty cycle."""
-        resp = self._hid_xfer(bytes([self.PWM_GET_DUTY_U16, pin.id]), True)
+        resp = self._hid_xfer(bytes([self.PWM_GET_DUTY_U16, pin_id]), True)
         if resp[1] != self.RESP_OK:
             raise RuntimeError("PWM get duty cycle error.")
         return int.from_bytes(resp[3 : 3 + 4], byteorder="little")
 
-    def pwm_set_duty_cycle(self, pin, duty_cycle):
+    def pwm_set_duty_cycle(self, pin_id: int, duty_cycle):
         """PWM set duty cycle."""
         resp = self._hid_xfer(
-            bytes([self.PWM_SET_DUTY_U16, pin.id])
+            bytes([self.PWM_SET_DUTY_U16, pin_id])
             + duty_cycle.to_bytes(2, byteorder="little"),
             True,
         )
