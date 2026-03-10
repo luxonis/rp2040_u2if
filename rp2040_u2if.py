@@ -78,6 +78,30 @@ class RP2040_u2if:
     PWM_SET_DUTY_NS = 0x36
     PWM_GET_DUTY_NS = 0x37
 
+    # UART0
+    UART0_INIT   = 0x50
+    UART0_DEINIT = 0x51
+    UART0_WRITE  = 0x52
+    UART0_READ   = 0x53
+
+    # UART1 (firmware offset)
+    UART1_OFFSET = 0x70
+
+    UART1_INIT   = UART0_INIT   + UART1_OFFSET
+    UART1_DEINIT = UART0_DEINIT + UART1_OFFSET
+    UART1_WRITE  = UART0_WRITE  + UART1_OFFSET
+    UART1_READ   = UART0_READ   + UART1_OFFSET
+
+    #Relay
+    RELAY_PINS = {
+        1: (64, 65),
+        2: (66, 67),
+        3: (68, 69),
+        4: (70, 71),
+    }
+    RELAY_PULSE = 0.02
+
+
     def __init__(self):
         self._vid = None
         self._pid = None
@@ -523,4 +547,125 @@ class RP2040_u2if:
         )
         if resp[1] != self.RESP_OK:
             raise RuntimeError("PWM set duty cycle error.")
+
+    # ----------------------------------------------------------------
+    # UART
+    # ----------------------------------------------------------------
+
+    def uart_init(self, baudrate=9600, uart=1):
+        """Initialize UART (default UART1)."""
+        if uart not in (0, 1):
+            raise ValueError("UART must be 0 or 1")
+
+        cmd = self.UART0_INIT if uart == 0 else self.UART1_INIT
+
+        resp = self._hid_xfer(
+            bytes([cmd, 0x00]) + baudrate.to_bytes(4, byteorder="little"),
+            True,
+        )
+
+        if resp[1] != self.RESP_OK:
+            raise RuntimeError("UART init error")
+
+        self._uart_index = uart
+
+    def uart_write(self, data, uart=None):
+        """Write bytes to UART."""
+        if uart is None:
+            uart = getattr(self, "_uart_index", 1)
+
+        if isinstance(data, list):
+            data = bytes(data)
+
+        cmd = self.UART0_WRITE if uart == 0 else self.UART1_WRITE
+
+        start = 0
+        end = len(data)
+
+        while (end - start) > 0:
+            remain = end - start
+            chunk = min(remain, 64 - 3)
+
+            resp = self._hid_xfer(
+                bytes([cmd, chunk]) + data[start:start + chunk],
+                True,
+            )
+
+            if resp[1] != self.RESP_OK:
+                raise RuntimeError("UART write error")
+
+            start += chunk
+
+    def _uart_read_report(self, uart=None):
+        """Low-level read of one HID UART report."""
+        if uart is None:
+            uart = getattr(self, "_uart_index", 1)
+
+        cmd = self.UART0_READ if uart == 0 else self.UART1_READ
+
+        resp = self._hid_xfer(bytes([cmd]), True)
+
+        if resp[1] != self.RESP_OK:
+            raise RuntimeError("UART read error")
+
+        size = resp[2]
+        return bytes(resp[3:3 + size])
+
+    def uart_read(self, uart=None):
+        """Read all currently available UART bytes."""
+        data = bytearray()
+
+        while True:
+            chunk = self._uart_read_report(uart)
+
+            if not chunk:
+                break
+
+            data.extend(chunk)
+
+        return bytes(data)   
+
+    # ----------------------------------------------------------------
+    # RELAYS
+    # ----------------------------------------------------------------
+    
+    def relay_init(self):
+        """Initialize all relay GPIO pins."""
+        for pinA, pinB in self.RELAY_PINS.values():
+            self.gpio_init_pin(pinA, self.GPIO_OUT, self.GPIO_PULL_NONE)
+            self.gpio_init_pin(pinB, self.GPIO_OUT, self.GPIO_PULL_NONE)
+
+            self.gpio_set_pin(pinA, 0)
+            self.gpio_set_pin(pinB, 0)
+
+    def relay_set(self, relay: int):
+        """Set relay (1..4)."""
+        if relay not in self.RELAY_PINS:
+            raise ValueError("Relay must be 1..4")
+
+        pinA, pinB = self.RELAY_PINS[relay]
+
+        self.gpio_set_pin(pinA, 1)
+        self.gpio_set_pin(pinB, 0)
+
+        time.sleep(self.RELAY_PULSE)
+
+        self.gpio_set_pin(pinA, 0)
+        self.gpio_set_pin(pinB, 0)
+
+    def relay_reset(self, relay: int):
+        """Reset relay (1..4)."""
+        if relay not in self.RELAY_PINS:
+            raise ValueError("Relay must be 1..4")
+
+        pinA, pinB = self.RELAY_PINS[relay]
+
+        self.gpio_set_pin(pinA, 0)
+        self.gpio_set_pin(pinB, 1)
+
+        time.sleep(self.RELAY_PULSE)
+
+        self.gpio_set_pin(pinA, 0)
+        self.gpio_set_pin(pinB, 0)
+
 
