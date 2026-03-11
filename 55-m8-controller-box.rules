@@ -1,0 +1,6 @@
+# PICO                                                                                                                                                                                                                                                                                                                        
+SUBSYSTEM=="usb", ATTR{idVendor}=="cafe", ATTR{idProduct}=="4005", MODE="0666"                                                                                                                                                                                                                                                
+#pcm2912 audio                                                                                                                                                                                                                                                                                                                
+SUBSYSTEM=="usb", ATTR{idVendor}=="08bb", ATTR{idProduct}=="2912", MODE="0666"
+# uses OpenMoko VID
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="1d50", ATTRS{idProduct}=="606f", MODE="660", GROUP="users", TAG+="uaccess"
