@@ -14,8 +14,8 @@ Behavior:
 • Send the message "hello"
 • Read back any received UART data
 
-Default configuration:
-    UART1 is used unless another UART is specified.
+Configuration:
+    UART must be explicitly selected (0 or 1).
 """
 
 import time
@@ -26,45 +26,42 @@ from rp2040_u2if import RP2040_u2if
 # Create RP2040 interface
 # ------------------------------------------------------------
 
-# Create the u2if helper class
 dev = RP2040_u2if()
-
-# Open the HID connection to the RP2040 device
 dev.open()
+
+
+# ------------------------------------------------------------
+# UART configuration
+# ------------------------------------------------------------
+
+UART_PORT = 1
 
 
 # ------------------------------------------------------------
 # Initialize UART
 # ------------------------------------------------------------
 
-# Initialize UART1 at 115200 baud
-# (UART1 is the default if no UART index is provided)
-dev.uart_init(115200)
+dev.uart_init(UART_PORT, 115200)
 
 
 # ------------------------------------------------------------
 # Clear any existing UART data
 # ------------------------------------------------------------
 
-# Sometimes devices send startup messages or noise.
-# This clears any existing data in the buffer.
-dev.uart_read()
+dev.uart_read(UART_PORT)
 
 
 # ------------------------------------------------------------
 # Send data over UART
 # ------------------------------------------------------------
 
-# Write a test message to the UART port
-dev.uart_write(b"hello\n")
+dev.uart_write(UART_PORT, b"hello\n")
 
 
 # ------------------------------------------------------------
 # Read UART response
 # ------------------------------------------------------------
 
-# Read all available UART data
-data = dev.uart_read()
+data = dev.uart_read(UART_PORT)
 
-# Print the received bytes
 print(data)

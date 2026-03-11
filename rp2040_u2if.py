@@ -92,38 +92,6 @@ class RP2040_u2if:
     UART1_WRITE  = UART0_WRITE  + UART1_OFFSET
     UART1_READ   = UART0_READ   + UART1_OFFSET
 
-    #Relay
-    RELAY_PINS = {
-        1: (64, 65),
-        2: (66, 67),
-        3: (68, 69),
-        4: (70, 71),
-    }
-    RELAY_PULSE = 0.02
-
-    #LEDs and Buttons
-    PANEL_LED_PINS = [17, 16, 18]
-    PANEL_BUTTON_PINS = [19, 20, 21]
-
-    GPIO_MAP = {
-        1: 0,
-        2: 1,
-        3: 2,
-        4: 3,
-        5: 4,
-        6: 5,
-        7: 6,
-        8: 7,
-        9: 8,
-        10: 9,
-        11: 10,
-        12: 11,
-        13: 12,
-        14: 13,
-        15: 26,
-        16: 27,
-    }
-
 
     def __init__(self):
         self._vid = None
@@ -188,24 +156,11 @@ class RP2040_u2if:
         self._hid.close()
         self._opened = False
     
-
-    # ----------------------------------------------------------------
-    # GPIO REMAPPING
-    # Logical GPIO -> Physical RP2040 GPIO
-    # ----------------------------------------------------------------
-
-    def _map_gpio(self, pin):
-        """Translate logical GPIO to RP2040 physical pin."""
-        return self.GPIO_MAP.get(pin, pin)
-
     # ----------------------------------------------------------------
     # GPIO
     # ----------------------------------------------------------------
     def gpio_init_pin(self, pin_id, direction, pull):
         """Configure GPIO Pin."""
-
-        pin_id = self._map_gpio(pin_id)
-
         self._hid_xfer(
             bytes(
                 [
@@ -219,9 +174,6 @@ class RP2040_u2if:
 
     def gpio_set_pin(self, pin_id, value):
         """Set Current GPIO Pin Value"""
-
-        pin_id = self._map_gpio(pin_id)
-
         self._hid_xfer(
             bytes(
                 [
@@ -234,9 +186,6 @@ class RP2040_u2if:
 
     def gpio_get_pin(self, pin_id):
         """Get Current GPIO Pin Value"""
-
-        pin_id = self._map_gpio(pin_id)
-
         resp = self._hid_xfer(
             bytes(
                 [
@@ -593,248 +542,91 @@ class RP2040_u2if:
     # ----------------------------------------------------------------
     # UART
     # ----------------------------------------------------------------
-
-    def uart_init(self, baudrate=9600, uart=1):
-        """Initialize UART (default UART1)."""
+    
+    def uart_init(self, uart, baudrate=9600):
+        """Initialize a UART port.
+    
+        Parameters
+        ----------
+        uart : int
+            UART index (0 or 1)
+        baudrate : int
+            UART baud rate
+        """
         if uart not in (0, 1):
             raise ValueError("UART must be 0 or 1")
-
+    
         cmd = self.UART0_INIT if uart == 0 else self.UART1_INIT
-
+    
         resp = self._hid_xfer(
             bytes([cmd, 0x00]) + baudrate.to_bytes(4, byteorder="little"),
             True,
         )
-
+    
         if resp[1] != self.RESP_OK:
             raise RuntimeError("UART init error")
-
-        self._uart_index = uart
-
-    def uart_write(self, data, uart=None):
-        """Write bytes to UART."""
-        if uart is None:
-            uart = getattr(self, "_uart_index", 1)
-
+    
+    
+    def uart_write(self, uart, data):
+        """Write bytes to a UART port."""
+    
+        if uart not in (0, 1):
+            raise ValueError("UART must be 0 or 1")
+    
         if isinstance(data, list):
             data = bytes(data)
-
+    
         cmd = self.UART0_WRITE if uart == 0 else self.UART1_WRITE
-
+    
         start = 0
         end = len(data)
-
+    
         while (end - start) > 0:
             remain = end - start
             chunk = min(remain, 64 - 3)
-
+    
             resp = self._hid_xfer(
                 bytes([cmd, chunk]) + data[start:start + chunk],
                 True,
             )
-
+    
             if resp[1] != self.RESP_OK:
                 raise RuntimeError("UART write error")
-
+    
             start += chunk
-
-    def _uart_read_report(self, uart=None):
+    
+    
+    def _uart_read_report(self, uart):
         """Low-level read of one HID UART report."""
-        if uart is None:
-            uart = getattr(self, "_uart_index", 1)
-
+    
+        if uart not in (0, 1):
+            raise ValueError("UART must be 0 or 1")
+    
         cmd = self.UART0_READ if uart == 0 else self.UART1_READ
-
+    
         resp = self._hid_xfer(bytes([cmd]), True)
-
+    
         if resp[1] != self.RESP_OK:
             raise RuntimeError("UART read error")
-
+    
         size = resp[2]
         return bytes(resp[3:3 + size])
-
-    def uart_read(self, uart=None):
+    
+    
+    def uart_read(self, uart):
         """Read all currently available UART bytes."""
+    
+        if uart not in (0, 1):
+            raise ValueError("UART must be 0 or 1")
+    
         data = bytearray()
-
+    
         while True:
             chunk = self._uart_read_report(uart)
-
+    
             if not chunk:
                 break
-
+            
             data.extend(chunk)
-
-        return bytes(data)   
-
-    # ----------------------------------------------------------------
-    # RELAYS
-    # ----------------------------------------------------------------
     
-    def relay_init(self):
-        """Initialize all relay GPIO pins."""
-        for pinA, pinB in self.RELAY_PINS.values():
-            self.gpio_init_pin(pinA, self.GPIO_OUT, self.GPIO_PULL_NONE)
-            self.gpio_init_pin(pinB, self.GPIO_OUT, self.GPIO_PULL_NONE)
-
-            self.gpio_set_pin(pinA, 0)
-            self.gpio_set_pin(pinB, 0)
-
-    def relay_set(self, relay: int):
-        """Set relay (1..4)."""
-        if relay not in self.RELAY_PINS:
-            raise ValueError("Relay must be 1..4")
-
-        pinA, pinB = self.RELAY_PINS[relay]
-
-        self.gpio_set_pin(pinA, 1)
-        self.gpio_set_pin(pinB, 0)
-
-        time.sleep(self.RELAY_PULSE)
-
-        self.gpio_set_pin(pinA, 0)
-        self.gpio_set_pin(pinB, 0)
-
-    def relay_reset(self, relay: int):
-        """Reset relay (1..4)."""
-        if relay not in self.RELAY_PINS:
-            raise ValueError("Relay must be 1..4")
-
-        pinA, pinB = self.RELAY_PINS[relay]
-
-        self.gpio_set_pin(pinA, 0)
-        self.gpio_set_pin(pinB, 1)
-
-        time.sleep(self.RELAY_PULSE)
-
-        self.gpio_set_pin(pinA, 0)
-        self.gpio_set_pin(pinB, 0)
-
-# ----------------------------------------------------------------
-# PANEL WRAPPER (LEDs + Buttons)
-# ----------------------------------------------------------------
-
-class RP2040_Panel:
-    """
-    Helper wrapper for simple button + LED panels.
-    Keeps LEDs and buttons aligned by index.
-    """
-
-    def __init__(
-        self,
-        rp2040,
-        led_pins=RP2040_u2if.PANEL_LED_PINS,
-        button_pins=RP2040_u2if.PANEL_BUTTON_PINS):
-        self.rp2040 = rp2040
-        self.led_pins = led_pins
-        self.button_pins = button_pins
-
-        if len(self.led_pins) != len(self.button_pins):
-            raise ValueError("LED and button arrays must be same length")
-
-        # Store button states for event detection
-        self._prev_states = [False] * len(self.button_pins)
-        self._current_states = [False] * len(self.button_pins)
-
-
-    # Initialization
-    def init(self):
-        """Initialize LEDs and buttons."""
-
-        # LEDs as outputs
-        for pin in self.led_pins:
-            self.rp2040.gpio_init_pin(
-                pin,
-                RP2040_u2if.GPIO_OUT,
-                RP2040_u2if.GPIO_PULL_NONE
-            )
-            self.rp2040.gpio_set_pin(pin, 0)
-
-        # Buttons as inputs without pull-ups
-        for pin in self.button_pins:
-            self.rp2040.gpio_init_pin(
-                pin,
-                RP2040_u2if.GPIO_IN,
-                RP2040_u2if.GPIO_PULL_NONE
-            )
-
-        # Initialize button state tracking
-        for i, pin in enumerate(self.button_pins):
-            state = self.rp2040.gpio_get_pin(pin)
-            self._prev_states[i] = state
-            self._current_states[i] = state
-
-
-    # ------------------------------------------------------------
-    # BUTTON SCAN (updates internal state)
-    # ------------------------------------------------------------
-
-    def scan(self):
-        """
-        Update button states.
-
-        Should be called once per loop before checking events.
-        """
-        for i, pin in enumerate(self.button_pins):
-            self._prev_states[i] = self._current_states[i]
-            self._current_states[i] = self.rp2040.gpio_get_pin(pin)
-
-
-    # LED Control
-    def led_on(self, index):
-        """Turn LED on."""
-        self.rp2040.gpio_set_pin(self.led_pins[index], 1)
-
-    def led_off(self, index):
-        """Turn LED off."""
-        self.rp2040.gpio_set_pin(self.led_pins[index], 0)
-
-    def led_set(self, index, state):
-        """Set LED state."""
-        self.rp2040.gpio_set_pin(self.led_pins[index], int(state))
-
-
-    # Button Reading
-    def button_pressed(self, index):
-        """
-        Return True if button is pressed.
-
-        Schmitt trigger output is inverted:
-        LOW = pressed
-        HIGH = released
-        """
-        return self.rp2040.gpio_get_pin(self.button_pins[index])
-
-    def read_all_buttons(self):
-        """Return list of all button states."""
-        return [self.button_pressed(i) for i in range(len(self.button_pins))]
-
-
-    # ------------------------------------------------------------
-    # EVENT DETECTION
-    # ------------------------------------------------------------
-
-    def button_pressed_event(self, index):
-        """
-        True only once when the button transitions
-        from released -> pressed.
-        """
-        return (not self._prev_states[index]) and self._current_states[index]
-
-    def button_released_event(self, index):
-        """
-        True only once when the button transitions
-        from pressed -> released.
-        """
-        return self._prev_states[index] and (not self._current_states[index])
-
-
-    # Convenience Helpers
-    def mirror_buttons_to_leds(self):
-        """
-        Simple helper:
-        LED turns on when button is pressed.
-        """
-        for i in range(len(self.button_pins)):
-            self.led_set(i, self.button_pressed(i))
-
+        return bytes(data)

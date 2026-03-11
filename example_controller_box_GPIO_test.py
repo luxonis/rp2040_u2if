@@ -1,17 +1,27 @@
 """
-RP2040 GPIO Sequential Hardware Tester
---------------------------------------
+Controller Box GPIO Sequential Hardware Tester
+-----------------------------------------------
 
-Tests GPIO pins by generating a random digital signal on each pin and
-verifying it on a fixed input pin.
+Tests logical GPIO pins by generating a random digital signal on each pin
+and verifying it on a fixed input pin.
 
-Connect the input pin to the pin being tested when prompted.
+This example validates the GPIO remapping implemented in ControllerBox.
+
+When prompted, connect the input pin to the pin currently being tested.
+
+Example:
+Connect GPIO1 -> GPIO2
+
+The script sends random HIGH/LOW signals and checks if the input follows.
+
+A PASS occurs when a sequence of matching signals is detected.
 """
 
 import time
 import random
 import sys
 from rp2040_u2if import RP2040_u2if
+from controller_box import ControllerBox
 
 
 # ------------------------------------------------------------
@@ -21,15 +31,17 @@ from rp2040_u2if import RP2040_u2if
 rp2040 = RP2040_u2if()
 rp2040.open()
 
+box = ControllerBox(rp2040)
+
 
 # ------------------------------------------------------------
 # Test configuration
 # ------------------------------------------------------------
 
-# GPIO pins to test
+# Logical GPIO pins to test (these use the ControllerBox remap)
 test_pins = list(range(1, 17))
 
-# Input pin used for verification
+# Logical input pin used for verification
 input_pin = 1
 
 # Number of consecutive matches required for PASS
@@ -37,7 +49,7 @@ length_of_roll = 10
 
 
 # Initialize input pin
-rp2040.gpio_init_pin(input_pin, RP2040_u2if.GPIO_IN, RP2040_u2if.GPIO_PULL_DOWN)
+box.gpio_init(input_pin, rp2040.GPIO_IN, rp2040.GPIO_PULL_DOWN)
 
 
 # ------------------------------------------------------------
@@ -62,8 +74,8 @@ for pin in test_pins:
     if pin == input_pin:
         continue
 
-    rp2040.gpio_init_pin(pin, RP2040_u2if.GPIO_OUT, RP2040_u2if.GPIO_PULL_NONE)
-    rp2040.gpio_set_pin(pin, 0)
+    box.gpio_init(pin, rp2040.GPIO_OUT, rp2040.GPIO_PULL_NONE)
+    box.gpio_set(pin, 0)
 
     print(f"\nConnect GPIO{input_pin} to GPIO{pin}")
 
@@ -75,11 +87,11 @@ for pin in test_pins:
     while True:
 
         value = random.randint(0, 1)
-        rp2040.gpio_set_pin(pin, value)
+        box.gpio_set(pin, value)
 
         time.sleep(0.2)
 
-        read = 1 if rp2040.gpio_get_pin(input_pin) else 0
+        read = 1 if box.gpio_get(input_pin) else 0
 
         out_rolls.append(value)
         in_rolls.append(read)
@@ -102,7 +114,7 @@ for pin in test_pins:
             print(f"  -> PASS (GPIO{pin})")
             break
 
-    rp2040.gpio_set_pin(pin, 0)
+    box.gpio_set(pin, 0)
 
 
 print("\nAll GPIO tests finished.")

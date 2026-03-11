@@ -1,9 +1,9 @@
 """
-RP2040 Relay Control Example
-----------------------------
+Controller Box Relay Control Example
+------------------------------------
 
 This example demonstrates how to control the relay outputs using
-the RP2040_u2if helper library.
+the ControllerBox helper wrapper.
 
 The firmware exposes 4 relays which can be controlled using:
 
@@ -23,6 +23,7 @@ The example cycles through all relays continuously.
 
 import time
 from rp2040_u2if import RP2040_u2if
+from controller_box import ControllerBox
 
 
 # ------------------------------------------------------------
@@ -37,14 +38,21 @@ rp2040.open()
 
 
 # ------------------------------------------------------------
+# Create controller box wrapper
+# ------------------------------------------------------------
+
+box = ControllerBox(rp2040)
+
+
+# ------------------------------------------------------------
 # Initialize indicator LED
 # ------------------------------------------------------------
 
 # Configure GPIO17 as an output for a status LED
-rp2040.gpio_init_pin(
+box.gpio_init(
     17,
-    RP2040_u2if.GPIO_OUT,
-    RP2040_u2if.GPIO_PULL_NONE
+    rp2040.GPIO_OUT,
+    rp2040.GPIO_PULL_NONE
 )
 
 
@@ -52,8 +60,11 @@ rp2040.gpio_init_pin(
 # Initialize relay control pins
 # ------------------------------------------------------------
 
-# Configure all relay GPIO pins used internally by the library
-rp2040.relay_init()
+# Configure all relay GPIO pins
+box.relay_init()
+
+# Configure panel
+box.panel_init()
 
 
 # ------------------------------------------------------------
@@ -72,10 +83,9 @@ while True:
         print("Relay", relay, "SET")
 
         # Turn LED ON to indicate relay activity
-        rp2040.gpio_set_pin(17, 1)
-
+        box.led_on(0)
         # Send SET pulse to the relay
-        rp2040.relay_set(relay)
+        box.relay_set(relay)
 
         # Wait before resetting
         time.sleep(0.5)
@@ -87,10 +97,10 @@ while True:
         print("Relay", relay, "RESET")
 
         # Turn LED OFF
-        rp2040.gpio_set_pin(17, 0)
+        box.led_off(0)
 
         # Send RESET pulse to the relay
-        rp2040.relay_reset(relay)
+        box.relay_reset(relay)
 
         # Wait before moving to the next relay
         time.sleep(0.5)
