@@ -279,17 +279,17 @@ class ControllerBox:
 
     def led_on(self, index):
         """Turn LED on."""
-        self.rp2040.gpio_set_pin(self.LED_PINS[index], 1)
+        self.rp2040.gpio_set_pin(self.LED_PINS[index-1], 1)
 
 
     def led_off(self, index):
         """Turn LED off."""
-        self.rp2040.gpio_set_pin(self.LED_PINS[index], 0)
+        self.rp2040.gpio_set_pin(self.LED_PINS[index-1], 0)
 
 
     def led_set(self, index, state):
         """Set LED state."""
-        self.rp2040.gpio_set_pin(self.LED_PINS[index], int(state))
+        self.rp2040.gpio_set_pin(self.LED_PINS[index-1], int(state))
 
 
     

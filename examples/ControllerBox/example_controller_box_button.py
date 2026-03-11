@@ -49,7 +49,7 @@ def button_cb(btn, state):
         True = pressed
         False = released
     """
-    box.led_set(btn - 1, state)
+    box.led_set(btn, state)
 
 
 # Register callback
