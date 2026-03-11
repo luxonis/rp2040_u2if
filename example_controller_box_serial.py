@@ -16,18 +16,14 @@ Behavior:
 """
 
 import time
-from rp2040_u2if import RP2040_u2if
 from controller_box import ControllerBox
 
 
 # ------------------------------------------------------------
-# Initialize device
+# Connect to ControllerBox device
 # ------------------------------------------------------------
 
-rp2040 = RP2040_u2if()
-rp2040.open()
-
-box = ControllerBox(rp2040)
+box = ControllerBox()
 
 
 # ------------------------------------------------------------

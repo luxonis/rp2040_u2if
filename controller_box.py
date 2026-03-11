@@ -1,4 +1,6 @@
 import time
+import threading
+from rp2040_u2if import RP2040_u2if
 
 
 class ControllerBox:
@@ -8,7 +10,7 @@ class ControllerBox:
     This class wraps the RP2040_u2if interface and provides a simple,
     board-oriented API for interacting with the Controller Box hardware.
     It handles logical GPIO remapping and exposes helper functions for
-    controlling relays, panel LEDs, and reading panel buttons.
+    controlling relays, LEDs, and reading buttons.
     """
 
     # Mapping GPIO
@@ -31,6 +33,18 @@ class ControllerBox:
         16: 27,
     }
 
+    REV_GPIO_MAP = {v: k for k, v in GPIO_MAP.items()}
+
+    GPIO_IN = 0
+    GPIO_OUT = 1
+    GPIO_PULL_NONE = 0
+    GPIO_PULL_UP = 1
+    GPIO_PULL_DOWN = 2
+
+    # IRQ event types
+    IRQ_RISING = 1
+    IRQ_FALLING = 2
+
     # Relays
     RELAY_PINS = {
         1: (64, 65),
@@ -42,53 +56,76 @@ class ControllerBox:
     RELAY_PULSE = 0.02
 
     #LEDs and Buttons
-    PANEL_LED_PINS = [17, 16, 18]
-    PANEL_BUTTON_PINS = [19, 20, 21]
+    LED_PINS = [17, 16, 18]
+    BUTTON_PINS = [19, 20, 21]
 
 
-    def __init__(self, rp2040):
+    def __init__(self):
         """
-        Parameters
-        ----------
-        rp2040 : RP2040_u2if
-            Existing RP2040 interface object
+        Initialize ControllerBox device.
         """
-        self.rp2040 = rp2040
+
+        self.rp2040 = RP2040_u2if()
+        self.rp2040.open()
+
+        self._btn_callback = None
+        self._btn_thread = None
+        self._running = False
+
+
+    def close(self):
+        self._running = False
+        if self._btn_thread:
+            self._btn_thread.join(timeout=0.1)
+        self.rp2040.close()
 
     # ----------------------------------------------------------------
-    # GPIO REMAPPING
+    # GPIO
     # ----------------------------------------------------------------
 
     def map_gpio(self, pin):
-        """
-        Translate logical GPIO to RP2040 physical pin.
-        """
+        """Translate logical GPIO to RP2040 physical pin."""
         return self.GPIO_MAP.get(pin, pin)
 
-    # ----------------------------------------------------------------
-    # GPIO WRAPPERS
-    # ----------------------------------------------------------------
 
     def gpio_init(self, pin, direction, pull):
-        """
-        Initialize GPIO using logical pin numbers.
-        """
-        pin = self.map_gpio(pin)
-        self.rp2040.gpio_init_pin(pin, direction, pull)
+        """Initialize a GPIO using logical pin numbers."""
+        gpio = self.map_gpio(pin)
+        self.rp2040.gpio_init_pin(gpio, direction, pull)
+
 
     def gpio_set(self, pin, value):
-        """
-        Set GPIO value using logical pin numbers.
-        """
-        pin = self.map_gpio(pin)
-        self.rp2040.gpio_set_pin(pin, value)
+        """Set a GPIO output value using logical pin numbers."""
+        gpio = self.map_gpio(pin)
+        self.rp2040.gpio_set_pin(gpio, int(value))
+
 
     def gpio_get(self, pin):
+        """Read a GPIO value using logical pin numbers."""
+        gpio = self.map_gpio(pin)
+        return self.rp2040.gpio_get_pin(gpio)
+
+
+    def gpio_set_irq(self, pin, event, debounce=True):
+        """Configure GPIO interrupt using logical pin numbers."""
+        gpio = self.map_gpio(pin)
+        self.rp2040.gpio_set_irq(gpio, event, debounce)
+
+
+    def gpio_get_irq(self):
         """
-        Read GPIO value using logical pin numbers.
+        Retrieve GPIO interrupt events using logical pin numbers.
+
+        Returns
+        -------
+        list[(pin, event)]
         """
-        pin = self.map_gpio(pin)
-        return self.rp2040.gpio_get_pin(pin)
+        events = self.rp2040.gpio_get_irq()
+
+        return [
+            (self.REV_GPIO_MAP.get(gpio, gpio), event)
+            for gpio, event in events
+        ]
 
     # ----------------------------------------------------------------
     # OPTIONAL HELPERS
@@ -100,8 +137,9 @@ class ControllerBox:
         """
         for logical_pin in self.GPIO_MAP:
             self.gpio_init(logical_pin, direction, pull)
-            
 
+    
+        
     # ----------------------------------------------------------------
     # RELAYS
     # ----------------------------------------------------------------
@@ -159,122 +197,100 @@ class ControllerBox:
 
 
     # ----------------------------------------------------------------
-    # PANEL (LEDs + Buttons)
+    # BUTTON EVENTS
     # ----------------------------------------------------------------
 
-    def panel_init(self):
-        """Initialize LEDs and buttons."""
+    def set_btn_callback(self, callback):
 
-        if len(self.PANEL_LED_PINS) != len(self.PANEL_BUTTON_PINS):
-            raise ValueError("LED and button arrays must be same length")
+        self._btn_callback = callback
 
-        # State tracking
-        self._prev_states = [False] * len(self.PANEL_BUTTON_PINS)
-        self._current_states = [False] * len(self.PANEL_BUTTON_PINS)
+        # Precompute GPIO → button index
+        self._btn_map = {
+            pin: i + 1
+            for i, pin in enumerate(self.BUTTON_PINS)
+        }
 
-        # LEDs as outputs
-        for pin in self.PANEL_LED_PINS:
-            self.rp2040.gpio_init_pin(
-                pin,
-                self.rp2040.GPIO_OUT,
-                self.rp2040.GPIO_PULL_NONE
-            )
-            self.rp2040.gpio_set_pin(pin, 0)
+        for pin in self.BUTTON_PINS:
 
-        # Buttons as inputs
-        for pin in self.PANEL_BUTTON_PINS:
             self.rp2040.gpio_init_pin(
                 pin,
                 self.rp2040.GPIO_IN,
                 self.rp2040.GPIO_PULL_NONE
             )
 
-        # Initialize button state cache
-        for i, pin in enumerate(self.PANEL_BUTTON_PINS):
-            state = self.rp2040.gpio_get_pin(pin)
-            self._prev_states[i] = state
-            self._current_states[i] = state
+            self.rp2040.gpio_set_irq(
+                pin,
+                self.rp2040.IRQ_EVENT_RISING |
+                self.rp2040.IRQ_EVENT_FALLING,
+                True
+            )
 
+        self._running = True
 
-    # ------------------------------------------------------------
-    # BUTTON SCAN
-    # ------------------------------------------------------------
+        self._btn_thread = threading.Thread(
+            target=self._button_event_loop,
+            daemon=True
+        )
 
-    def panel_scan(self):
-        """
-        Update button states.
-        Call once per loop before reading buttons.
-        """
-        for i, pin in enumerate(self.PANEL_BUTTON_PINS):
-            self._prev_states[i] = self._current_states[i]
-            self._current_states[i] = self.rp2040.gpio_get_pin(pin)
+        self._btn_thread.start()
+
+    def _button_event_loop(self):
+
+        while self._running:
+
+            for gpio, event in self.rp2040.gpio_get_irq():
+
+                btn = self._btn_map.get(gpio)
+
+                if btn is None:
+                    continue
+                
+                # debug:
+                # print("GPIO:", gpio, "BTN:", btn, "EVENT:", event)
+
+                if event == self.rp2040.IRQ_EVENT_RISING:
+                    state = True
+
+                elif event == self.rp2040.IRQ_EVENT_FALLING:
+                    state = False
+
+                else:
+                    continue
+
+                if self._btn_callback:
+                    self._btn_callback(btn, state)
+
+            time.sleep(0.001)
 
 
     # ------------------------------------------------------------
     # LED CONTROL
     # ------------------------------------------------------------
 
+    def led_init(self):
+        """Initialize LEDs."""
+        for pin in self.LED_PINS:
+            self.rp2040.gpio_init_pin(
+                pin,
+                self.rp2040.GPIO_OUT,
+                self.rp2040.GPIO_PULL_NONE
+            )
+            self.rp2040.gpio_set_pin(pin, 0)  # start OFF
+
     def led_on(self, index):
         """Turn LED on."""
-        self.rp2040.gpio_set_pin(self.PANEL_LED_PINS[index], 1)
+        self.rp2040.gpio_set_pin(self.LED_PINS[index], 1)
 
 
     def led_off(self, index):
         """Turn LED off."""
-        self.rp2040.gpio_set_pin(self.PANEL_LED_PINS[index], 0)
+        self.rp2040.gpio_set_pin(self.LED_PINS[index], 0)
 
 
     def led_set(self, index, state):
         """Set LED state."""
-        self.rp2040.gpio_set_pin(self.PANEL_LED_PINS[index], int(state))
+        self.rp2040.gpio_set_pin(self.LED_PINS[index], int(state))
 
-
-    # ------------------------------------------------------------
-    # BUTTON READING (CACHED)
-    # ------------------------------------------------------------
-
-    def button_pressed(self, index):
-        """
-        Return True if button is pressed.
-
-        Uses cached state from panel_scan().
-        """
-        return self._current_states[index]
-
-
-    def read_all_buttons(self):
-        """Return list of all button states (cached)."""
-        return list(self._current_states)
-
-
-    # ------------------------------------------------------------
-    # EVENT DETECTION
-    # ------------------------------------------------------------
-
-    def button_pressed_event(self, index):
-        """
-        True once when button transitions
-        released -> pressed.
-        """
-        return (not self._prev_states[index]) and self._current_states[index]
-
-
-    def button_released_event(self, index):
-        """
-        True once when button transitions
-        pressed -> released.
-        """
-        return self._prev_states[index] and (not self._current_states[index])
-
-
-    # ------------------------------------------------------------
-    # MIRROR BUTTONS - CONVENIENCE
-    # ------------------------------------------------------------
-
-    def mirror_buttons_to_leds(self):
-        """LED turns on when button is pressed."""
-        for i in range(len(self.PANEL_BUTTON_PINS)):
-            self.led_set(i, self._current_states[i])
 
     
     # ----------------------------------------------------------------

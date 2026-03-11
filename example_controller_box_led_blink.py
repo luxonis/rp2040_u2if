@@ -3,10 +3,10 @@ Controller Box LED Blink Example
 --------------------------------
 
 This example demonstrates how to control LEDs using the
-ControllerBox helper wrapper.
+ControllerBox device.
 
 The ControllerBox manages the LED pins defined in the library
-(PANEL_LED_PINS) and provides simple helper functions such as:
+(LED_PINS) and provides simple helper functions such as:
 
     led_on(index)
     led_off(index)
@@ -20,36 +20,23 @@ Behavior:
 • Repeat forever
 
 LED index mapping:
-    LED 0 -> first LED in PANEL_LED_PINS
+    LED 0 -> first LED
     LED 1 -> second LED
     LED 2 -> third LED
 """
 
 import time
-from rp2040_u2if import RP2040_u2if
 from controller_box import ControllerBox
 
 
 # ------------------------------------------------------------
-# Create RP2040 interface
+# Connect to ControllerBox device
 # ------------------------------------------------------------
 
-# Create the u2if helper class
-rp2040 = RP2040_u2if()
+box = ControllerBox()
 
-# Open the HID connection to the RP2040 device
-rp2040.open()
-
-
-# ------------------------------------------------------------
-# Create and initialize the controller box helper
-# ------------------------------------------------------------
-
-# Create the ControllerBox wrapper
-box = ControllerBox(rp2040)
-
-# Initialize panel GPIO pins (LEDs and buttons)
-box.panel_init()
+# Initialize LEDs
+box.led_init()
 
 
 # ------------------------------------------------------------

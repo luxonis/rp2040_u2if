@@ -3,7 +3,7 @@ Controller Box Relay Control Example
 ------------------------------------
 
 This example demonstrates how to control the relay outputs using
-the ControllerBox helper wrapper.
+the ControllerBox device.
 
 The firmware exposes 4 relays which can be controlled using:
 
@@ -22,38 +22,14 @@ The example cycles through all relays continuously.
 """
 
 import time
-from rp2040_u2if import RP2040_u2if
 from controller_box import ControllerBox
 
 
 # ------------------------------------------------------------
-# Create RP2040 interface
+# Connect to ControllerBox device
 # ------------------------------------------------------------
 
-# Create the u2if helper class
-rp2040 = RP2040_u2if()
-
-# Open the HID connection to the RP2040 device
-rp2040.open()
-
-
-# ------------------------------------------------------------
-# Create controller box wrapper
-# ------------------------------------------------------------
-
-box = ControllerBox(rp2040)
-
-
-# ------------------------------------------------------------
-# Initialize indicator LED
-# ------------------------------------------------------------
-
-# Configure GPIO17 as an output for a status LED
-box.gpio_init(
-    17,
-    rp2040.GPIO_OUT,
-    rp2040.GPIO_PULL_NONE
-)
+box = ControllerBox()
 
 
 # ------------------------------------------------------------
@@ -63,8 +39,8 @@ box.gpio_init(
 # Configure all relay GPIO pins
 box.relay_init()
 
-# Configure panel
-box.panel_init()
+# Configure  LED
+box.led_init()
 
 
 # ------------------------------------------------------------

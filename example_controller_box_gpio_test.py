@@ -20,18 +20,14 @@ A PASS occurs when a sequence of matching signals is detected.
 import time
 import random
 import sys
-from rp2040_u2if import RP2040_u2if
 from controller_box import ControllerBox
 
 
 # ------------------------------------------------------------
-# Initialize RP2040
+# Connect to ControllerBox device
 # ------------------------------------------------------------
 
-rp2040 = RP2040_u2if()
-rp2040.open()
-
-box = ControllerBox(rp2040)
+box = ControllerBox()
 
 
 # ------------------------------------------------------------
@@ -49,7 +45,7 @@ length_of_roll = 10
 
 
 # Initialize input pin
-box.gpio_init(input_pin, rp2040.GPIO_IN, rp2040.GPIO_PULL_DOWN)
+box.gpio_init(input_pin, box.GPIO_IN, box.GPIO_PULL_DOWN)
 
 
 # ------------------------------------------------------------
@@ -74,7 +70,7 @@ for pin in test_pins:
     if pin == input_pin:
         continue
 
-    box.gpio_init(pin, rp2040.GPIO_OUT, rp2040.GPIO_PULL_NONE)
+    box.gpio_init(pin, box.GPIO_OUT, box.GPIO_PULL_NONE)
     box.gpio_set(pin, 0)
 
     print(f"\nConnect GPIO{input_pin} to GPIO{pin}")
