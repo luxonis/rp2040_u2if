@@ -35,6 +35,14 @@ class RP2040_u2if:
     GPIO_PULL_UP = 1
     GPIO_PULL_DOWN = 2
 
+    # GPIO IRQ
+    GPIO_SET_IRQ = 0x23
+    GPIO_GET_IRQ = 0x24
+
+    IRQ_EVENT_NONE = 0
+    IRQ_EVENT_RISING = 1
+    IRQ_EVENT_FALLING = 2
+
     # ADC
     ADC_INIT_PIN = 0x40
     ADC_GET_VALUE = 0x41
@@ -77,6 +85,21 @@ class RP2040_u2if:
     PWM_GET_DUTY_U16 = 0x35
     PWM_SET_DUTY_NS = 0x36
     PWM_GET_DUTY_NS = 0x37
+
+    # UART0
+    UART0_INIT   = 0x50
+    UART0_DEINIT = 0x51
+    UART0_WRITE  = 0x52
+    UART0_READ   = 0x53
+
+    # UART1 (firmware offset)
+    UART1_OFFSET = 0x70
+
+    UART1_INIT   = UART0_INIT   + UART1_OFFSET
+    UART1_DEINIT = UART0_DEINIT + UART1_OFFSET
+    UART1_WRITE  = UART0_WRITE  + UART1_OFFSET
+    UART1_READ   = UART0_READ   + UART1_OFFSET
+
 
     def __init__(self):
         self._vid = None
@@ -140,7 +163,7 @@ class RP2040_u2if:
         self._hid_xfer(bytes([self.SYS_RESET]), True)
         self._hid.close()
         self._opened = False
-
+    
     # ----------------------------------------------------------------
     # GPIO
     # ----------------------------------------------------------------
@@ -181,6 +204,67 @@ class RP2040_u2if:
             True,
         )
         return resp[3] != 0x00
+    
+    def gpio_set_irq(self, pin_id, events, debounced=True):
+        """
+        Configure interrupt events for a GPIO pin.
+
+        Parameters
+        ----------
+        pin_id : int
+            GPIO number
+        events : int
+            IRQ_EVENT_RISING | IRQ_EVENT_FALLING
+        debounced : bool
+            Use firmware debouncing
+        """
+
+        self._hid_xfer(
+            bytes([
+                self.GPIO_SET_IRQ,
+                pin_id,
+                events,
+                1 if debounced else 0
+            ])
+        )
+
+
+    # ----------------------------------------------------------------
+    # GPIO IRQ
+    # ----------------------------------------------------------------
+
+    def gpio_get_irq(self):
+        """
+        Retrieve GPIO interrupt events.
+    
+        Returns
+        -------
+        list[tuple]
+            List of (gpio, event) tuples.
+        """
+    
+        resp = self._hid_xfer(
+            bytes([self.GPIO_GET_IRQ]),
+            True,
+        )
+    
+        if resp[1] != self.RESP_OK:
+            return []
+    
+        irq_count = resp[2]
+    
+        events = []
+    
+        for i in range(irq_count):
+        
+            ev = resp[3 + i]
+    
+            gpio = ev & 0x3F
+            event = (ev >> 6) & 0x03
+    
+            events.append((gpio, event))
+    
+        return events
 
     # ----------------------------------------------------------------
     # ADC
@@ -524,3 +608,94 @@ class RP2040_u2if:
         if resp[1] != self.RESP_OK:
             raise RuntimeError("PWM set duty cycle error.")
 
+    # ----------------------------------------------------------------
+    # UART
+    # ----------------------------------------------------------------
+    
+    def uart_init(self, uart, baudrate=9600):
+        """Initialize a UART port.
+    
+        Parameters
+        ----------
+        uart : int
+            UART index (0 or 1)
+        baudrate : int
+            UART baud rate
+        """
+        if uart not in (0, 1):
+            raise ValueError("UART must be 0 or 1")
+    
+        cmd = self.UART0_INIT if uart == 0 else self.UART1_INIT
+    
+        resp = self._hid_xfer(
+            bytes([cmd, 0x00]) + baudrate.to_bytes(4, byteorder="little"),
+            True,
+        )
+    
+        if resp[1] != self.RESP_OK:
+            raise RuntimeError("UART init error")
+    
+    
+    def uart_write(self, uart, data):
+        """Write bytes to a UART port."""
+    
+        if uart not in (0, 1):
+            raise ValueError("UART must be 0 or 1")
+    
+        if isinstance(data, list):
+            data = bytes(data)
+    
+        cmd = self.UART0_WRITE if uart == 0 else self.UART1_WRITE
+    
+        start = 0
+        end = len(data)
+    
+        while (end - start) > 0:
+            remain = end - start
+            chunk = min(remain, 64 - 3)
+    
+            resp = self._hid_xfer(
+                bytes([cmd, chunk]) + data[start:start + chunk],
+                True,
+            )
+    
+            if resp[1] != self.RESP_OK:
+                raise RuntimeError("UART write error")
+    
+            start += chunk
+    
+    
+    def _uart_read_report(self, uart):
+        """Low-level read of one HID UART report."""
+    
+        if uart not in (0, 1):
+            raise ValueError("UART must be 0 or 1")
+    
+        cmd = self.UART0_READ if uart == 0 else self.UART1_READ
+    
+        resp = self._hid_xfer(bytes([cmd]), True)
+    
+        if resp[1] != self.RESP_OK:
+            raise RuntimeError("UART read error")
+    
+        size = resp[2]
+        return bytes(resp[3:3 + size])
+    
+    
+    def uart_read(self, uart):
+        """Read all currently available UART bytes."""
+    
+        if uart not in (0, 1):
+            raise ValueError("UART must be 0 or 1")
+    
+        data = bytearray()
+    
+        while True:
+            chunk = self._uart_read_report(uart)
+    
+            if not chunk:
+                break
+            
+            data.extend(chunk)
+    
+        return bytes(data)
