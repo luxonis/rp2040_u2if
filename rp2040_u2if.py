@@ -7,6 +7,8 @@
 import os
 import time
 import hid
+import struct
+from enum import Enum
 
 # Use to set delay between reset and device reopen. if negative, don't reset at all
 RP2040_U2IF_RESET_DELAY = float(os.environ.get("RP2040_U2IF_RESET_DELAY", 1))
@@ -91,6 +93,70 @@ class RP2040_u2if:
     UART1_DEINIT = UART0_DEINIT + UART1_OFFSET
     UART1_WRITE  = UART0_WRITE  + UART1_OFFSET
     UART1_READ   = UART0_READ   + UART1_OFFSET
+
+    # FSYNC_CONTROLLER
+    FSYNC_I2C_BUS = 0
+    FSYNC_I2C_CLK_SPEED = 400000
+    FSYNC_CONTROLLER_ADDR = 0x12
+    FSYNC_CONTROLLER_DATA_ENDIAN = '<' # little
+
+    @staticmethod
+    def _fsync_stm_bin(cmd: int, n: int) -> bytes:
+        if n == 1:
+            return struct.pack(RP2040_u2if.FSYNC_CONTROLLER_DATA_ENDIAN + 'B', cmd)
+        elif n == 2:
+            return struct.pack(RP2040_u2if.FSYNC_CONTROLLER_DATA_ENDIAN + 'H', cmd)
+        elif n == 4:
+            return struct.pack(RP2040_u2if.FSYNC_CONTROLLER_DATA_ENDIAN + 'I', cmd)
+        else:
+            raise ValueError("Invalid number of bytes")
+        
+
+
+    @staticmethod
+    def _fsync_stm_output_duty_cycle(duty_cycle: float) -> bytes:
+        if duty_cycle < 0.0 or duty_cycle > 100.0:
+            raise ValueError("Duty cycle must be between 0% and 100%")
+        
+        scale = 2048
+        duty = int(round(duty_cycle / 100.0 * scale))
+        duty = min(max(duty, 0), scale)
+
+        return RP2040_u2if._fsync_stm_bin(duty, 4)
+
+    @staticmethod
+    def _fsync_stm_internal_frequency(freq: float) -> bytes:
+        if freq < 0.0 or freq > 600.0:
+            raise ValueError("Frequency must be between 0Hz and 600Hz")
+        
+        return struct.pack(RP2040_u2if.FSYNC_CONTROLLER_DATA_ENDIAN + 'f', freq)
+
+    def _fsync_stm_write(self, cmd: bytes) -> None:
+        self.i2c_writeto(self.FSYNC_CONTROLLER_ADDR, cmd)
+
+    def _fsync_stm_read(self, cmd: bytes) -> bytes:
+        resp = bytearray(4)
+        self.i2c_writeto_then_readfrom(self.FSYNC_CONTROLLER_ADDR, cmd, resp)
+        return resp
+    
+    @staticmethod
+    def _fsync_stm_to_int(resp: bytes) -> int:
+        if len(resp) == 1:
+            return struct.unpack(RP2040_u2if.FSYNC_CONTROLLER_DATA_ENDIAN + 'B', resp)[0]
+        elif len(resp) == 2:
+            return struct.unpack(RP2040_u2if.FSYNC_CONTROLLER_DATA_ENDIAN + 'H', resp)[0]
+        elif len(resp) == 4:
+            return struct.unpack(RP2040_u2if.FSYNC_CONTROLLER_DATA_ENDIAN + 'I', resp)[0]
+        else:
+            raise ValueError("Invalid number of bytes")
+
+    @staticmethod
+    def _fsync_stm_to_float(resp: bytes) -> float:
+        if len(resp) == 4:
+            return struct.unpack(RP2040_u2if.FSYNC_CONTROLLER_DATA_ENDIAN + 'f', resp)[0]
+        else:
+            raise ValueError("Invalid number of bytes")
+
 
 
     def __init__(self):
@@ -630,3 +696,186 @@ class RP2040_u2if:
             data.extend(chunk)
     
         return bytes(data)
+    
+    def fsync_controller_init(self):
+        """
+        Fsync controller uses I2C bus 0.
+        Calling any other i2c functions may result in undefined behavior.
+        """
+        self.i2c_set_port(self.FSYNC_I2C_BUS)
+        self.i2c_configure(self.FSYNC_I2C_CLK_SPEED)
+        slaves = self.i2c_scan(start=self.FSYNC_CONTROLLER_ADDR, end=self.FSYNC_CONTROLLER_ADDR + 1)
+
+        if self.FSYNC_CONTROLLER_ADDR not in slaves:
+            raise RuntimeError("FSYNC Controller not found")
+        
+        # test if device is locked
+        self._fsync_stm_write(self.FSYNC_STM_CONFIG_REG + self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT)
+        mode = self._fsync_stm_read(self.FSYNC_STM_CONFIG_REG)
+        if mode != self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT:
+            # try to unlock
+            self._fsync_stm_write(self.FSYNC_STM_FW_VERSION_REG + self.FSYNC_STM_UNLOCK_MAGIC)
+            self._fsync_stm_write(self.FSYNC_STM_CONFIG_REG + self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT)
+            mode = self._fsync_stm_read(self.FSYNC_STM_CONFIG_REG)
+            if mode != self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT:
+                raise RuntimeError("Unable to unlock FSYNC Controller")
+        
+        # we have write access
+        # rever to master mode with input
+        self._fsync_stm_write(self.FSYNC_STM_CONFIG_REG + self.FSYNC_STM_CONFIG_REG_MASTER_INPUT)
+
+    class FsyncMode(Enum):
+        """Defines FsyncController modes"""
+        MASTER_INPUT = 0
+        MASTER_OUTPUT = 1
+        SLAVE= 2
+
+    def fsync_controller_set_mode(self, mode: FsyncMode):
+        """
+        Set FsyncController mode
+        ----------
+        mode : FsyncMode
+            FsyncMode to set
+        """
+        if mode == self.FsyncMode.MASTER_INPUT:
+            mode_to_set = self.FSYNC_STM_CONFIG_REG_MASTER_INPUT
+        elif mode == self.FsyncMode.MASTER_OUTPUT:
+            mode_to_set = self.FSYNC_STM_CONFIG_REG_MASTER_OUTPUT
+        elif mode == self.FsyncMode.SLAVE:
+            mode_to_set = self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT
+        else:
+            raise ValueError("Invalid FsyncMode")
+
+        self._fsync_stm_write(self.FSYNC_STM_CONFIG_REG + mode_to_set)
+        read_mode = self._fsync_stm_read(self.FSYNC_STM_CONFIG_REG)
+        if read_mode != mode_to_set:
+            raise RuntimeError("Failed to set FsyncMode")
+    
+    def fsync_controller_set_frequency(self, freq: float) -> float:
+        """
+        Set FsyncController frequency
+        ----------
+        freq : float
+            Frequency to set
+        Returns
+        -------
+        actual_freq : float
+            Actual frequency set
+        """
+        self._fsync_stm_write(self.FSYNC_STM_INTERNAL_FREQUENCY_REG + self._fsync_stm_internal_frequency(freq))
+        actual_frq = self._fsync_stm_read(self.FSYNC_STM_ACTUAL_FREQUENCY_REG)
+        return self._fsync_stm_to_float(actual_frq)
+        
+    class FsyncOutput(Enum):
+        ISOLATED_STROBE = 0
+        M8_FSYNC = 1
+
+    def fsync_controller_set_duty_cycle(self, duty_cycle: float, output: FsyncOutput) -> float:
+        """
+        Set FsyncController duty cycle
+        ----------
+        duty_cycle : float
+            Duty cycle to set
+        output : FsyncOutput
+            Output to set
+        Returns
+        -------
+        actual_duty_cycle : float
+            Actual duty cycle set
+        """
+        if output == self.FsyncOutput.ISOLATED_STROBE:
+            output_to_set = self.FSYNC_STM_OUTPUT_3_DUTY_CYCLE
+        elif output == self.FsyncOutput.M8_FSYNC:
+            output_to_set = self.FSYNC_STM_OUTPUT_11_DUTY_CYCLE
+        else:
+            raise ValueError("Invalid FsyncOutput")
+        
+        duty_cycle_to_set = self._fsync_stm_output_duty_cycle(duty_cycle)
+        self._fsync_stm_write(output_to_set + duty_cycle_to_set)
+        actual_duty_cycle = self._fsync_stm_to_int(self._fsync_stm_read(output_to_set))
+        return 100.0 * actual_duty_cycle / 2048.0
+
+        return actual_duty_cycle
+    
+    def fsync_controller_set_polarity(self, polarity: bool, output: FsyncOutput):
+        """
+        Set FsyncController polarity
+        ----------
+        polarity : bool
+            Polarity to set
+        output : FsyncOutput
+            Output to set
+        """
+        if output == self.FsyncOutput.ISOLATED_STROBE:
+            output_to_set = self.FSYNC_STM_OUTPUT_3_ACTIVE_LVL
+        elif output == self.FsyncOutput.M8_FSYNC:
+            output_to_set = self.FSYNC_STM_OUTPUT_11_ACTIVE_LVL
+        else:
+            raise ValueError("Invalid FsyncOutput")
+
+        if polarity:
+            polarity_to_set = self.FSYNC_STM_OUTPUT_ACTIVE_LVL_HIGH
+        else:
+            polarity_to_set = self.FSYNC_STM_OUTPUT_ACTIVE_LVL_LOW
+
+        self._fsync_stm_write(output_to_set + polarity_to_set)
+
+    def fsync_controller_input_detectetd(self) -> bool:
+        """
+        Check if input is detected. Works only in slave mode and master input mode.
+        Returns
+        -------
+        input_detected : bool
+            True if input is detected
+        """
+        present =  self._fsync_stm_to_int(self._fsync_stm_read(self.FSYNC_STM_IN_PRESENT_REG))
+        if present == 0:
+            return False
+        elif present == 1:
+            return True
+        else:
+            raise RuntimeError(f"Unexpected input present value: {present}")
+
+    def fsync_controller_input_frequency(self) -> float:
+        """
+        Get input frequency. Works only in slave mode and master input mode.
+        Returns
+        -------
+        input_frequency : float
+            Input frequency
+        """
+        return self._fsync_stm_to_float(self._fsync_stm_read(self.FSYNC_STM_IN_FREQ_REG))
+
+    def fsync_controller_input_duty_cycle(self) -> float:
+        """
+        Get input duty cycle. Works only in slave mode and master input mode.
+        Returns
+        -------
+        input_duty_cycle : float
+            Input duty cycle
+        """
+        return self._fsync_stm_to_float(self._fsync_stm_read(self.FSYNC_STM_IN_DUTY_REG))
+    
+RP2040_u2if.FSYNC_STM_FW_VERSION_REG = RP2040_u2if._fsync_stm_bin(0x00, 1)
+RP2040_u2if.FSYNC_STM_UNLOCK_MAGIC = RP2040_u2if._fsync_stm_bin(42, 4) # this must be written to fw version register after each reset to allow writing to other registers
+
+RP2040_u2if.FSYNC_STM_CONFIG_REG = RP2040_u2if._fsync_stm_bin(0x01, 1)
+RP2040_u2if.FSYNC_STM_CONFIG_REG_MASTER_INPUT = RP2040_u2if._fsync_stm_bin(0x00, 4)
+RP2040_u2if.FSYNC_STM_CONFIG_REG_MASTER_OUTPUT = RP2040_u2if._fsync_stm_bin(0x01, 4)
+RP2040_u2if.FSYNC_STM_CONFIG_REG_SLAVE_INPUT = RP2040_u2if._fsync_stm_bin(0x02, 4)
+
+RP2040_u2if.FSYNC_STM_INTERNAL_FREQUENCY_REG = RP2040_u2if._fsync_stm_bin(0x02, 1)
+RP2040_u2if.FSYNC_STM_ACTUAL_FREQUENCY_REG = RP2040_u2if._fsync_stm_bin(0x03, 1)
+
+RP2040_u2if.FSYNC_STM_IN_PRESENT_REG = RP2040_u2if._fsync_stm_bin(0x04, 1)
+RP2040_u2if.FSYNC_STM_IN_FREQ_REG = RP2040_u2if._fsync_stm_bin(0x05, 1)
+RP2040_u2if.FSYNC_STM_IN_DUTY_REG = RP2040_u2if._fsync_stm_bin(0x06, 1)
+
+RP2040_u2if.FSYNC_STM_OUTPUT_3_DUTY_CYCLE = RP2040_u2if._fsync_stm_bin(0x0E, 1)
+RP2040_u2if.FSYNC_STM_OUTPUT_3_ACTIVE_LVL = RP2040_u2if._fsync_stm_bin(0x0F, 1)
+
+RP2040_u2if.FSYNC_STM_OUTPUT_11_DUTY_CYCLE = RP2040_u2if._fsync_stm_bin(0x1E, 1)
+RP2040_u2if.FSYNC_STM_OUTPUT_11_ACTIVE_LVL = RP2040_u2if._fsync_stm_bin(0x1F, 1)
+
+RP2040_u2if.FSYNC_STM_OUTPUT_ACTIVE_LVL_LOW = RP2040_u2if._fsync_stm_bin(0x00, 4)
+RP2040_u2if.FSYNC_STM_OUTPUT_ACTIVE_LVL_HIGH = RP2040_u2if._fsync_stm_bin(0x01, 4)
