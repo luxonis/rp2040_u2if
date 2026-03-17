@@ -16,7 +16,7 @@ Behavior:
 """
 
 import time
-from controller_box import ControllerBox
+from luxonis_u2if import ControllerBox
 
 
 # ------------------------------------------------------------
