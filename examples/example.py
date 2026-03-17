@@ -1,5 +1,5 @@
 import time
-from rp2040_u2if import RP2040_u2if
+from luxonis_u2if import RP2040_u2if
 
 # Modify serial to correspond with the device in question
 DEVICE_SERIAL_1 = '0x...'

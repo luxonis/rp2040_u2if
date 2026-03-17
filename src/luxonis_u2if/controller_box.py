@@ -1,6 +1,6 @@
 import time
 import threading
-from rp2040_u2if import RP2040_u2if
+from .rp2040_u2if import RP2040_u2if
 
 
 class ControllerBox:

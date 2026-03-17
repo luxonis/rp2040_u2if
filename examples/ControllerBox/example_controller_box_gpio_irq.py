@@ -6,7 +6,7 @@ Demonstrates how to read button events directly from GPIO IRQ.
 """
 
 import time
-from controller_box import ControllerBox
+from luxonis_u2if import ControllerBox
 
 
 box = ControllerBox()

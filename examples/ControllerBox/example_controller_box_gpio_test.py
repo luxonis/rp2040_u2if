@@ -20,7 +20,7 @@ A PASS occurs when a sequence of matching signals is detected.
 import time
 import random
 import sys
-from controller_box import ControllerBox
+from luxonis_u2if import ControllerBox
 
 
 # ------------------------------------------------------------
