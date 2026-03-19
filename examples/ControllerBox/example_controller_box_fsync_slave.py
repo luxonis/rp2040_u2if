@@ -95,11 +95,3 @@ dev.fsync_controller_set_polarity(False, out)
 # Set duty cycle (%)
 # 50% → equal HIGH/LOW time
 dev.fsync_controller_set_duty_cycle(50.0, out)
-
-
-# ------------------------------------------------------------
-# Optional: keep running / monitoring
-# ------------------------------------------------------------
-
-while True:
-    time.sleep(1)
