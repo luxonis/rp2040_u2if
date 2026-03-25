@@ -1,27 +1,26 @@
 import time
 from sys import argv
-from rp2040_u2if import RP2040_u2if
+from src.luxonis_u2if.controller_box import ControllerBox
 
 # rst : 64 + 16 - 2 = 78
 # boot : 64 + 17 - 2 = 79
 RST = 78
 BOOT = 79
 
-def init_rp2040() -> RP2040_u2if:
-    rp2040 = RP2040_u2if()
-    rp2040.open()
+def init() -> ControllerBox:
+    controller_box = ControllerBox()
 
-    rp2040.gpio_init_pin(RST, RP2040_u2if.GPIO_OUT, RP2040_u2if.GPIO_PULL_NONE)
-    rp2040.gpio_init_pin(BOOT, RP2040_u2if.GPIO_OUT, RP2040_u2if.GPIO_PULL_NONE)
+    controller_box.gpio_init(RST, ControllerBox.GPIO_OUT, ControllerBox.GPIO_PULL_NONE)
+    controller_box.gpio_init(BOOT, ControllerBox.GPIO_OUT, ControllerBox.GPIO_PULL_NONE)
 
-    return rp2040
+    return controller_box
 
-def bootloader_mode(mode: int, rp2040: RP2040_u2if):
-    rp2040.gpio_set_pin(BOOT, mode);
+def bootloader_mode(mode: int, controller_box: ControllerBox):
+    controller_box.gpio_set(BOOT, mode);
     time.sleep(0.05);
-    rp2040.gpio_set_pin(RST, 1);
+    controller_box.gpio_set(RST, 1);
     time.sleep(0.2);
-    rp2040.gpio_set_pin(RST, 0);
+    controller_box.gpio_set(RST, 0);
     time.sleep(0.05);
 
 if __name__ == "__main__":
@@ -32,10 +31,10 @@ if __name__ == "__main__":
     if mode not in (0, 1):
         print("Usage: set_prog_state.py <0|1>")
         exit(1)
-    rp2040 = init_rp2040()
+    controller_box = init()
     if mode == 0:
         print("Setting unprogrammed state")
-        bootloader_mode(1, rp2040)
+        bootloader_mode(1, controller_box)
     else:
         print("Setting programmed state")
-        bootloader_mode(0, rp2040)
+        bootloader_mode(0, controller_box)
