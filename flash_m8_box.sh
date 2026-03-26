@@ -1,9 +1,7 @@
 #!/bin/bash
 
 # this runs on the device
-set -e
-
-if [ -z "$1" || -z "$2" || -z "$3" ]; then
+if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ]; then
     echo "Usage: $0 <rpi image> <can image> <fsync image>"
     exit 1
 fi
