@@ -19,7 +19,9 @@ cp program-fsync-controller-m8-box.sh deploy_m8
 cp requirements.txt deploy_m8
 cp set_prog_state_can.py deploy_m8
 cp set_prog_state.py deploy_m8
-cp flash_m8_box.sh deploy_m8
+cp flash_rpi.sh deploy_m8
+cp flash_can.sh deploy_m8
+cp flash_fsync.sh deploy_m8
 
 zip -r m8_flashing.zip deploy_m8
 scp m8_flashing.zip root@$DEVICE_IP:/data/m8_flashing.zip

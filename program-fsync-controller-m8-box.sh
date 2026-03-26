@@ -48,13 +48,13 @@ get_version() {
 }
 
 reset_board() {
-    /usr/bin/python /data/set_prog_state.py 0
+    /usr/bin/python ./set_prog_state.py 0
     sleep 1
-    /usr/bin/python /data/set_prog_state.py 1
+    /usr/bin/python ./set_prog_state.py 1
 }
 
 enter_bootloader() {
-    /usr/bin/python /data/set_prog_state.py 0
+    /usr/bin/python ./set_prog_state.py 0
     if $I2C_DETECT -y -r $I2C_BUS $BOOTLOADER_I2C_ADDR $BOOTLOADER_I2C_ADDR \
        | grep -qE "(^|[[:space:]])("${BOOTLOADER_I2C_ADDR#0x}")([[:space:]]|$)"; then
         
@@ -68,7 +68,7 @@ enter_bootloader() {
 }
 
 exit_bootloader() {
-    /usr/bin/python /data/set_prog_state.py 1
+    /usr/bin/python ./set_prog_state.py 1
 }
 
 program_stm() {
@@ -306,7 +306,7 @@ update_stm32_firmware() {
         fi
 
         # Let the kenel module know that the STM32 is programmed
-        /usr/bin/python /data/set_prog_state.py 1
+        /usr/bin/python ./set_prog_state.py 1
         recovery_success=1
         break
     done

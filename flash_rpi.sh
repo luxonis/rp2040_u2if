@@ -1,13 +1,11 @@
 #!/bin/bash
 
 # this runs on the device
-if [ -z "$1" ] || [ -z "$2" ] || [ -z "$3" ]; then
-    echo "Usage: $0 <rpi image> <can image> <fsync image>"
+if [ -z "$1" ]; then
+    echo "Usage: $0 <rpi image>"
     exit 1
 fi
 rpi_image=$1
-can_image=$2
-fsync_image=$3
 
 find_usb_device() {
     vendor_id=$1
@@ -33,6 +31,7 @@ flash_rpi() {
             # ask user to boot rp2040 into bootloader and wait for input
             echo "Press the boot button while powering the m8 box"
             read -n 1 -s
+            echo "Discovering bootloader disk..."
 
             # check if rpi presents as a storage device
             disk_dev=$(lsblk -o NAME,MODEL,VENDOR | grep -E "^sd[a-z][[:space:]]+?RP2[[:space:]]+?RPI.*?$")
@@ -70,7 +69,7 @@ flash_rpi() {
         cp $image mnt/
 
         echo "waiting for RPI to boot"
-        sleep 7
+        sleep 10
 
         umount mnt
 
@@ -88,57 +87,6 @@ flash_rpi() {
     return 0
 }
 
-flash_can() {
-    image=$1
-
-    # put CAN stm into bootloader mode
-    echo "Putting CAN into bootloader mode"
-    python set_prog_state_can.py 0
-    
-    sleep 2
-
-    # find STM DFU bootloader
-    find_usb_device "0483" "df11"
-    if [ $? -ne 0 ]; then
-        echo "No STM DFU bootloader found"
-        return 1
-    fi
-
-    echo "Found STM DFU bootloader"
-    echo "Flashing CAN"
-    dfu-util -a 0 -i 0 -s 0x08000000:leave -D candleLight_fw.bin
-    
-    # find CAN device OpenMoko VID
-    find_usb_device "1d50" "606f"
-    if [ $? -ne 0 ]; then
-        echo "No CAN found"
-        return 1
-    fi
-
-    echo "CAN flashed successfully"
-
-    return 0
-}
-
-flash_fsync() {
-    image=$1
-
-    # ask the user to attach i2c probes to i2c lines and wait for input
-    echo "Attach i2c probes to i2c lines"
-    read -n 1 -s
-
-    echo "Flashing FSYNC"
-
-    ./program-fsync-controller-m8-box.sh flash $image
-
-    if [ $? -ne 0 ]; then
-        echo "FSYNC flash failed"
-        return 1
-    fi
-
-    return 0
-}
-
 # check if directory exists
 if [ ! -d ./venv/ ]; then
     python3 -m venv venv
@@ -152,7 +100,12 @@ test_pip=$(pip -v)
 if [ $? -ne 0 ]; then
     python3 -m ensurepip
 fi
-pip install -r requirements.txt
+
+has_hidapi=$(pip freeze | grep hidapi)
+ret=$?
+if [ $ret -ne 0 ]; then
+    python -m pip install -r requirements.txt
+fi
 
 # enable m8 usb
 echo "Enabling m8 usb"
@@ -162,17 +115,5 @@ echo host > /sys/class/usb_role/a600000.ssusb-role-switch/role
 flash_rpi $rpi_image
 if [ $? -ne 0 ]; then
     echo "RPI flash failed"
-    exit 1
-fi
-
-flash_can $can_image
-if [ $? -ne 0 ]; then
-    echo "CAN flash failed"
-    exit 1
-fi
-
-flash_fsync $fsync_image
-if [ $? -ne 0 ]; then
-    echo "FSYNC flash failed"
     exit 1
 fi
