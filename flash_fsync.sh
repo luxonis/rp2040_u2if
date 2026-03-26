@@ -54,6 +54,10 @@ echo "Enabling m8 usb"
 gpioset 0 32=0
 echo host > /sys/class/usb_role/a600000.ssusb-role-switch/role
 
+# enable i2c on m8 connector
+echo "Enabling i2c on m8 connector"
+gpioset 0 124=0 79=0
+
 flash_fsync $fsync_image
 if [ $? -ne 0 ]; then
     echo "FSYNC flash failed"
