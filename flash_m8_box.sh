@@ -19,10 +19,10 @@ find_usb_device() {
 
     if [ -z "$usb_dev" ]; then
         echo "No device found."
-        exit 1
+        return 1
     fi
     echo "Found device: $usb_dev"
-    exit 0
+    return 0
 }
 
 flash_rpi() {
@@ -59,7 +59,7 @@ flash_rpi() {
 
         if [ -z "$part_dev" ]; then
             echo "No disk found"
-            exit 1
+            return 1
         fi
 
         echo "Mounting disk $part_dev"
@@ -85,7 +85,7 @@ flash_rpi() {
 
         break
     done
-    exit 0
+    return 0
 }
 
 flash_can() {
@@ -101,7 +101,7 @@ flash_can() {
     find_usb_device "0483" "df11"
     if [ $? -ne 0 ]; then
         echo "No STM DFU bootloader found"
-        exit 1
+        return 1
     fi
 
     echo "Found STM DFU bootloader"
@@ -112,12 +112,12 @@ flash_can() {
     find_usb_device "1d50" "606f"
     if [ $? -ne 0 ]; then
         echo "No CAN found"
-        exit 1
+        return 1
     fi
 
     echo "CAN flashed successfully"
 
-    exit 0
+    return 0
 }
 
 flash_fsync() {
@@ -133,10 +133,10 @@ flash_fsync() {
 
     if [ $? -ne 0 ]; then
         echo "FSYNC flash failed"
-        exit 1
+        return 1
     fi
 
-    exit 0
+    return 0
 }
 
 # check if directory exists
