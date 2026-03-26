@@ -29,7 +29,7 @@ flash_rpi() {
     while true; do
         while true; do
             # ask user to boot rp2040 into bootloader and wait for input
-            echo "Press the boot button while powering the m8 box"
+            echo "Press the boot button while powering the m8 box and press ENTER"
             read -n 1 -s
             echo "Discovering bootloader disk..."
 
