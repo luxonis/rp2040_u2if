@@ -110,6 +110,7 @@ fi
 # enable m8 usb
 echo "Enabling m8 usb"
 gpioset 0 32=0
+echo none > /sys/class/usb_role/a600000.ssusb-role-switch/role
 echo host > /sys/class/usb_role/a600000.ssusb-role-switch/role
 
 flash_rpi $rpi_image

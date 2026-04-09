@@ -52,6 +52,7 @@ fi
 # enable m8 usb
 echo "Enabling m8 usb"
 gpioset 0 32=0
+echo none > /sys/class/usb_role/a600000.ssusb-role-switch/role
 echo host > /sys/class/usb_role/a600000.ssusb-role-switch/role
 
 # enable i2c on m8 connector
