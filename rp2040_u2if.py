@@ -101,7 +101,6 @@ class RP2040_u2if:
         self._uart_index = None
         self._serial = None
         self._neopixel_initialized = False
-        self._uart_rx_buffer = bytearray()
 
     def _hid_xfer(self, report, response=True):
         """Perform HID Transfer"""
@@ -410,18 +409,21 @@ class RP2040_u2if:
     # ----------------------------------------------------------------
     # UART
     # ----------------------------------------------------------------
-    def uart_set_port(self, index):
-        """Set UART port."""
-        if index < 0 or index > 1:
-            raise ValueError("UART index must be 0 or 1.")
-        self._uart_index = index
-
-    def uart_configure(self, baudrate=9600, flush_rx=True):
-        """Configure UART."""
-        if self._uart_index is None:
-            raise RuntimeError("UART bus not initialized.")
-
-        report_id = self.UART0_INIT if self._uart_index == 0 else self.UART1_INIT
+    def uart_init(self, index: int, baudrate: int = 9600, flush_rx: bool =True):
+        """Initializes an UART port.
+    
+        Parameters
+        ----------
+        uart : int
+            UART index (0 or 1)
+        baudrate : int
+            UART baud rate
+        flush_rx : bool
+            Whether to flush the RX buffer on initialization.    
+        """
+        self._validate_uart_index_T(index)
+    
+        report_id = self.UART0_INIT if index == 0 else self.UART1_INIT
         resp = self._hid_xfer(
             bytes([report_id, 0x00]) + baudrate.to_bytes(4, byteorder="little"),
             True,
@@ -432,120 +434,109 @@ class RP2040_u2if:
         if flush_rx:
             self.uart_flush_rx()
 
-    def uart_deinit(self):
-        """Deinit UART."""
-        if self._uart_index is None:
-            return
+    def uart_deinit(self, index: int):
+        """Deinitializes an UART port."""
+        self._validate_uart_index_T(index)
 
-        report_id = self.UART0_DEINIT if self._uart_index == 0 else self.UART1_DEINIT
+        report_id = self.UART0_DEINIT if index == 0 else self.UART1_DEINIT
         resp = self._hid_xfer(bytes([report_id]), True)
         if resp[1] != self.RESP_OK:
             raise RuntimeError("UART deinit error.")
 
-    def _uart_read_rx_buffer(self):
-        if self._uart_index is None:
-            raise RuntimeError("UART bus not initialized.")
-
-        report_id = self.UART0_READ if self._uart_index == 0 else self.UART1_READ
+    def _validate_uart_index_T(self, index: int):
+        if index < 0 or index > 1:
+            raise ValueError("UART index must be 0 or 1.")
+        
+    def _uart_read_rx_buffer(self, report_id: int):
         resp = self._hid_xfer(bytes([report_id]), True)
         if resp[1] != self.RESP_OK:
             raise RuntimeError("UART read rx buffer error.")
 
         payload_size = resp[2]
-        self._uart_rx_buffer.extend(resp[3 : 3 + payload_size])
+        return bytes(resp[3:3 + payload_size])
 
-    def uart_flush_rx(self, max_reads=32):
+    def uart_flush_rx(self, index: int, max_reads=32) -> int:
         """Clear pending UART RX bytes from host and firmware buffers."""
-        if self._uart_index is None:
-            raise RuntimeError("UART bus not initialized.")
+        self._validate_uart_index_T(index)
 
-        self._uart_rx_buffer.clear()
 
-        report_id = self.UART0_READ if self._uart_index == 0 else self.UART1_READ
+        report_id = self.UART0_READ if index == 0 else self.UART1_READ
         flushed_bytes = 0
         for _ in range(max_reads):
-            resp = self._hid_xfer(bytes([report_id]), True)
-            if resp[1] != self.RESP_OK:
-                raise RuntimeError("UART read rx buffer error.")
-            payload_size = resp[2]
+            chunk = self._uart_read_rx_buffer(report_id)
+            payload_size = len(chunk)
             if payload_size == 0:
                 break
             flushed_bytes += payload_size
 
         return flushed_bytes
 
-    def uart_read(self, num_bytes=-1, timeout=None):
-        """Read bytes from UART."""
-        start_time = time.time()
+    def uart_read(self, index: int) -> bytes:
+        """Read all currently available UART bytes."""
+        self._validate_uart_index_T(index)
+
+        data = bytearray()
+
         while True:
-            self._uart_read_rx_buffer()
-            if num_bytes == -1 or len(self._uart_rx_buffer) >= num_bytes:
+            chunk = self._uart_read_rx_buffer(self.UART0_READ if index == 0 else self.UART1_READ)
+            
+            if not chunk:
                 break
-            if timeout is not None and (time.time() - start_time) > timeout:
-                break
 
-        read_size = min(num_bytes, len(self._uart_rx_buffer)) if num_bytes > 0 else len(self._uart_rx_buffer)
-        out = bytes(self._uart_rx_buffer[:read_size])
-        self._uart_rx_buffer = self._uart_rx_buffer[read_size:]
-        return out
+            data.extend(chunk)
 
-    def uart_readinto(self, buffer, num_bytes=-1, timeout=None):
-        """Read bytes from UART into an existing buffer."""
-        max_size = len(buffer)
-        if num_bytes > 0:
-            max_size = min(max_size, num_bytes)
+        return bytes(data)
 
-        data = self.uart_read(max_size, timeout)
-        for i, value in enumerate(data):
-            buffer[i] = value
-        return len(data)
-
-    def uart_readline(self, timeout=None):
-        """Read from UART until newline is received."""
+    def uart_readline(self, index: int, timeout=None) -> tuple[bytes, bytes]:
+        """
+        Reads from UART until newline is received.
+        Returns a line and any remaining bytes in the buffer
+        """
+        self._validate_uart_index_T(index)
 
         UART_END_LINE_CHAR = 10
 
         start_time = time.time()
         while True:
-            self._uart_read_rx_buffer()
-            if UART_END_LINE_CHAR in self._uart_rx_buffer:
+            data = self._uart_read_rx_buffer(self.UART0_READ if index == 0 else self.UART1_READ)
+            if UART_END_LINE_CHAR in data:
                 break
             if timeout is not None and (time.time() - start_time) > timeout:
                 break
 
-        if UART_END_LINE_CHAR not in self._uart_rx_buffer:
-            return b""
+        if UART_END_LINE_CHAR not in data:
+            return b"", bytes(data)
 
-        end_idx = self._uart_rx_buffer.index(UART_END_LINE_CHAR) + 1
-        out = bytes(self._uart_rx_buffer[:end_idx])
-        self._uart_rx_buffer = self._uart_rx_buffer[end_idx:]
-        return out
+        end_idx = data.index(UART_END_LINE_CHAR) + 1
+        out = bytes(data[:end_idx])
+        remaining = data[end_idx:]
+        return out, bytes(remaining)
 
-    def uart_write(self, buffer, *, start=0, end=None):
+    def uart_write(self, index: int, data):
         """Write bytes to UART."""
-        if self._uart_index is None:
-            raise RuntimeError("UART bus not initialized.")
+        self._validate_uart_index_T(index)
 
-        if isinstance(buffer, str):
-            buffer = buffer.encode("utf-8")
-
-        end = end if end else len(buffer)
-        write_cmd = self.UART0_WRITE if self._uart_index == 0 else self.UART1_WRITE
-
-        total_written = 0
+        if isinstance(data, list):
+            data = bytes(data)
+    
+        cmd = self.UART0_WRITE if index == 0 else self.UART1_WRITE
+    
+        start = 0
+        end = len(data)
+    
         while (end - start) > 0:
-            remain_bytes = end - start
-            chunk = min(remain_bytes, 64 - 3)
+            remain = end - start
+            chunk = min(remain, 64 - 3)
+    
             resp = self._hid_xfer(
-                bytes([write_cmd, chunk]) + buffer[start : (start + chunk)],
+                bytes([cmd, chunk]) + data[start:start + chunk],
                 True,
             )
+    
             if resp[1] != self.RESP_OK:
                 raise RuntimeError("UART write error")
+    
             start += chunk
-            total_written += chunk
-
-        return total_written
 
     # ----------------------------------------------------------------
     # NEOPIXEL
