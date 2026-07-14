@@ -494,10 +494,9 @@ class RP2040_u2if:
 
         return bytes(data)
 
-    def uart_readline(self, index: int, timeout=None) -> tuple[bytes, bytes]:
+    def uart_readline(self, index: int, timeout=None) -> bytes:
         """
         Reads from UART until newline is received.
-        Returns a line and any remaining bytes in the buffer
         """
         self._validate_uart_index_T(index)
 
@@ -518,13 +517,13 @@ class RP2040_u2if:
                 break
 
         if UART_END_LINE_CHAR not in carry:
-            return b"", bytes(carry)
+            return b""
 
         end_idx = carry.index(UART_END_LINE_CHAR) + 1
         out = bytes(carry[:end_idx])
         del carry[:end_idx]
-        remaining = bytes(carry)
-        return out, bytes(remaining)
+        
+        return out
 
     def uart_write(self, index: int, data):
         """Write bytes to UART."""
