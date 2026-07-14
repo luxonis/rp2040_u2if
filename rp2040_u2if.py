@@ -101,6 +101,7 @@ class RP2040_u2if:
         self._uart_index = None
         self._serial = None
         self._neopixel_initialized = False
+        self._uart_rx_carry = [bytearray(), bytearray()]
 
     def _hid_xfer(self, report, response=True):
         """Perform HID Transfer"""
@@ -423,32 +424,35 @@ class RP2040_u2if:
         """
         self._validate_uart_index_T(index)
     
-        report_id = self.UART0_INIT if index == 0 else self.UART1_INIT
+        uart_cmd = self.UART0_INIT if index == 0 else self.UART1_INIT
         resp = self._hid_xfer(
-            bytes([report_id, 0x00]) + baudrate.to_bytes(4, byteorder="little"),
+            bytes([uart_cmd, 0x00]) + baudrate.to_bytes(4, byteorder="little"),
             True,
         )
         if resp[1] != self.RESP_OK:
             raise RuntimeError("UART init error.")
 
         if flush_rx:
-            self.uart_flush_rx()
+            self.uart_flush_rx(index)
 
     def uart_deinit(self, index: int):
         """Deinitializes an UART port."""
         self._validate_uart_index_T(index)
 
-        report_id = self.UART0_DEINIT if index == 0 else self.UART1_DEINIT
-        resp = self._hid_xfer(bytes([report_id]), True)
+        uart_cmd = self.UART0_DEINIT if index == 0 else self.UART1_DEINIT
+        resp = self._hid_xfer(bytes([uart_cmd]), True)
         if resp[1] != self.RESP_OK:
             raise RuntimeError("UART deinit error.")
 
     def _validate_uart_index_T(self, index: int):
         if index < 0 or index > 1:
             raise ValueError("UART index must be 0 or 1.")
+
+    def _get_uart_read_cmd(self, index: int) -> int:
+        return self.UART0_READ if index == 0 else self.UART1_READ
         
-    def _uart_read_rx_buffer(self, report_id: int):
-        resp = self._hid_xfer(bytes([report_id]), True)
+    def _uart_read_rx_buffer(self, uart_cmd: int):
+        resp = self._hid_xfer(bytes([uart_cmd]), True)
         if resp[1] != self.RESP_OK:
             raise RuntimeError("UART read rx buffer error.")
 
@@ -460,10 +464,11 @@ class RP2040_u2if:
         self._validate_uart_index_T(index)
 
 
-        report_id = self.UART0_READ if index == 0 else self.UART1_READ
-        flushed_bytes = 0
+        uart_cmd = self._get_uart_read_cmd(index)
+        flushed_bytes = len(self._uart_rx_carry[index])
+        self._uart_rx_carry[index].clear()
         for _ in range(max_reads):
-            chunk = self._uart_read_rx_buffer(report_id)
+            chunk = self._uart_read_rx_buffer(uart_cmd)
             payload_size = len(chunk)
             if payload_size == 0:
                 break
@@ -475,10 +480,12 @@ class RP2040_u2if:
         """Read all currently available UART bytes."""
         self._validate_uart_index_T(index)
 
-        data = bytearray()
+        data = bytearray(self._uart_rx_carry[index])
+        uart_cmd = self._get_uart_read_cmd(index)
+        self._uart_rx_carry[index].clear()
 
         while True:
-            chunk = self._uart_read_rx_buffer(self.UART0_READ if index == 0 else self.UART1_READ)
+            chunk = self._uart_read_rx_buffer(uart_cmd)
             
             if not chunk:
                 break
@@ -495,21 +502,28 @@ class RP2040_u2if:
         self._validate_uart_index_T(index)
 
         UART_END_LINE_CHAR = 10
+        uart_cmd = self._get_uart_read_cmd(index)
+        carry = self._uart_rx_carry[index]
 
         start_time = time.time()
         while True:
-            data = self._uart_read_rx_buffer(self.UART0_READ if index == 0 else self.UART1_READ)
-            if UART_END_LINE_CHAR in data:
+            if UART_END_LINE_CHAR in carry:
                 break
+
+            chunk = self._uart_read_rx_buffer(uart_cmd)
+            if chunk:
+                carry.extend(chunk)
+
             if timeout is not None and (time.time() - start_time) > timeout:
                 break
 
-        if UART_END_LINE_CHAR not in data:
-            return b"", bytes(data)
+        if UART_END_LINE_CHAR not in carry:
+            return b"", bytes(carry)
 
-        end_idx = data.index(UART_END_LINE_CHAR) + 1
-        out = bytes(data[:end_idx])
-        remaining = data[end_idx:]
+        end_idx = carry.index(UART_END_LINE_CHAR) + 1
+        out = bytes(carry[:end_idx])
+        del carry[:end_idx]
+        remaining = bytes(carry)
         return out, bytes(remaining)
 
     def uart_write(self, index: int, data):
@@ -519,7 +533,7 @@ class RP2040_u2if:
         if isinstance(data, list):
             data = bytes(data)
     
-        cmd = self.UART0_WRITE if index == 0 else self.UART1_WRITE
+        uart_cmd = self.UART0_WRITE if index == 0 else self.UART1_WRITE
     
         start = 0
         end = len(data)
@@ -529,7 +543,7 @@ class RP2040_u2if:
             chunk = min(remain, 64 - 3)
     
             resp = self._hid_xfer(
-                bytes([cmd, chunk]) + data[start:start + chunk],
+                bytes([uart_cmd, chunk]) + data[start:start + chunk],
                 True,
             )
     
