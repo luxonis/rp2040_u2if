@@ -87,19 +87,17 @@ class RP2040_u2if:
     PWM_GET_DUTY_NS = 0x37
 
     # UART0
-    UART0_INIT   = 0x50
+    UART0_INIT = 0x50
     UART0_DEINIT = 0x51
-    UART0_WRITE  = 0x52
-    UART0_READ   = 0x53
+    UART0_WRITE = 0x52
+    UART0_READ = 0x53
 
-    # UART1 (firmware offset)
-    UART1_OFFSET = 0x70
-
-    UART1_INIT   = UART0_INIT   + UART1_OFFSET
-    UART1_DEINIT = UART0_DEINIT + UART1_OFFSET
-    UART1_WRITE  = UART0_WRITE  + UART1_OFFSET
-    UART1_READ   = UART0_READ   + UART1_OFFSET
-
+    # UART1
+    UART0_UART1_OFFSET = 0x70
+    UART1_INIT = UART0_INIT + UART0_UART1_OFFSET
+    UART1_DEINIT = UART0_DEINIT + UART0_UART1_OFFSET
+    UART1_WRITE = UART0_WRITE + UART0_UART1_OFFSET
+    UART1_READ = UART0_READ + UART0_UART1_OFFSET
 
     def __init__(self):
         self._vid = None
@@ -108,9 +106,10 @@ class RP2040_u2if:
         self._opened = False
         self._i2c_index = None
         self._spi_index = None
+        self._uart_index = None
         self._serial = None
         self._neopixel_initialized = False
-        self._uart_rx_buffer = None
+        self._uart_rx_carry = [bytearray(), bytearray()]
 
     def _hid_xfer(self, report, response=True):
         """Perform HID Transfer"""
@@ -478,6 +477,150 @@ class RP2040_u2if:
         raise NotImplementedError("SPI write_readinto Not implemented")
 
     # ----------------------------------------------------------------
+    # UART
+    # ----------------------------------------------------------------
+    def uart_init(self, index: int, baudrate: int = 9600, flush_rx: bool =True):
+        """Initializes an UART port.
+    
+        Parameters
+        ----------
+        uart : int
+            UART index (0 or 1)
+        baudrate : int
+            UART baud rate
+        flush_rx : bool
+            Whether to flush the RX buffer on initialization.    
+        """
+        self._validate_uart_index_T(index)
+    
+        uart_cmd = self.UART0_INIT if index == 0 else self.UART1_INIT
+        resp = self._hid_xfer(
+            bytes([uart_cmd, 0x00]) + baudrate.to_bytes(4, byteorder="little"),
+            True,
+        )
+        if resp[1] != self.RESP_OK:
+            raise RuntimeError("UART init error.")
+
+        if flush_rx:
+            self.uart_flush_rx(index)
+
+    def uart_deinit(self, index: int):
+        """Deinitializes an UART port."""
+        self._validate_uart_index_T(index)
+
+        uart_cmd = self.UART0_DEINIT if index == 0 else self.UART1_DEINIT
+        resp = self._hid_xfer(bytes([uart_cmd]), True)
+        if resp[1] != self.RESP_OK:
+            raise RuntimeError("UART deinit error.")
+
+    def _validate_uart_index_T(self, index: int):
+        if index < 0 or index > 1:
+            raise ValueError("UART index must be 0 or 1.")
+
+    def _get_uart_read_cmd(self, index: int) -> int:
+        return self.UART0_READ if index == 0 else self.UART1_READ
+        
+    def _uart_read_rx_buffer(self, uart_cmd: int):
+        resp = self._hid_xfer(bytes([uart_cmd]), True)
+        if resp[1] != self.RESP_OK:
+            raise RuntimeError("UART read rx buffer error.")
+
+        payload_size = resp[2]
+        return bytes(resp[3:3 + payload_size])
+
+    def uart_flush_rx(self, index: int, max_reads=32) -> int:
+        """Clear pending UART RX bytes from host and firmware buffers."""
+        self._validate_uart_index_T(index)
+
+
+        uart_cmd = self._get_uart_read_cmd(index)
+        flushed_bytes = len(self._uart_rx_carry[index])
+        self._uart_rx_carry[index].clear()
+        for _ in range(max_reads):
+            chunk = self._uart_read_rx_buffer(uart_cmd)
+            payload_size = len(chunk)
+            if payload_size == 0:
+                break
+            flushed_bytes += payload_size
+
+        return flushed_bytes
+
+    def uart_read(self, index: int) -> bytes:
+        """Read all currently available UART bytes."""
+        self._validate_uart_index_T(index)
+
+        data = bytearray(self._uart_rx_carry[index])
+        uart_cmd = self._get_uart_read_cmd(index)
+        self._uart_rx_carry[index].clear()
+
+        while True:
+            chunk = self._uart_read_rx_buffer(uart_cmd)
+            
+            if not chunk:
+                break
+
+            data.extend(chunk)
+
+        return bytes(data)
+
+    def uart_readline(self, index: int, timeout=None) -> bytes:
+        """
+        Reads from UART until newline is received.
+        """
+        self._validate_uart_index_T(index)
+
+        UART_END_LINE_CHAR = 10
+        uart_cmd = self._get_uart_read_cmd(index)
+        carry = self._uart_rx_carry[index]
+
+        start_time = time.time()
+        while True:
+            if UART_END_LINE_CHAR in carry:
+                break
+
+            chunk = self._uart_read_rx_buffer(uart_cmd)
+            if chunk:
+                carry.extend(chunk)
+
+            if timeout is not None and (time.time() - start_time) > timeout:
+                break
+
+        if UART_END_LINE_CHAR not in carry:
+            return b""
+
+        end_idx = carry.index(UART_END_LINE_CHAR) + 1
+        out = bytes(carry[:end_idx])
+        del carry[:end_idx]
+        
+        return out
+
+    def uart_write(self, index: int, data):
+        """Write bytes to UART."""
+        self._validate_uart_index_T(index)
+
+        if isinstance(data, list):
+            data = bytes(data)
+    
+        uart_cmd = self.UART0_WRITE if index == 0 else self.UART1_WRITE
+    
+        start = 0
+        end = len(data)
+    
+        while (end - start) > 0:
+            remain = end - start
+            chunk = min(remain, 64 - 3)
+    
+            resp = self._hid_xfer(
+                bytes([uart_cmd, chunk]) + data[start:start + chunk],
+                True,
+            )
+    
+            if resp[1] != self.RESP_OK:
+                raise RuntimeError("UART write error")
+    
+            start += chunk
+
+    # ----------------------------------------------------------------
     # NEOPIXEL
     # ----------------------------------------------------------------
     def neopixel_write(self, gpio, buf):
@@ -607,95 +750,3 @@ class RP2040_u2if:
         )
         if resp[1] != self.RESP_OK:
             raise RuntimeError("PWM set duty cycle error.")
-
-    # ----------------------------------------------------------------
-    # UART
-    # ----------------------------------------------------------------
-    
-    def uart_init(self, uart, baudrate=9600):
-        """Initialize a UART port.
-    
-        Parameters
-        ----------
-        uart : int
-            UART index (0 or 1)
-        baudrate : int
-            UART baud rate
-        """
-        if uart not in (0, 1):
-            raise ValueError("UART must be 0 or 1")
-    
-        cmd = self.UART0_INIT if uart == 0 else self.UART1_INIT
-    
-        resp = self._hid_xfer(
-            bytes([cmd, 0x00]) + baudrate.to_bytes(4, byteorder="little"),
-            True,
-        )
-    
-        if resp[1] != self.RESP_OK:
-            raise RuntimeError("UART init error")
-    
-    
-    def uart_write(self, uart, data):
-        """Write bytes to a UART port."""
-    
-        if uart not in (0, 1):
-            raise ValueError("UART must be 0 or 1")
-    
-        if isinstance(data, list):
-            data = bytes(data)
-    
-        cmd = self.UART0_WRITE if uart == 0 else self.UART1_WRITE
-    
-        start = 0
-        end = len(data)
-    
-        while (end - start) > 0:
-            remain = end - start
-            chunk = min(remain, 64 - 3)
-    
-            resp = self._hid_xfer(
-                bytes([cmd, chunk]) + data[start:start + chunk],
-                True,
-            )
-    
-            if resp[1] != self.RESP_OK:
-                raise RuntimeError("UART write error")
-    
-            start += chunk
-    
-    
-    def _uart_read_report(self, uart):
-        """Low-level read of one HID UART report."""
-    
-        if uart not in (0, 1):
-            raise ValueError("UART must be 0 or 1")
-    
-        cmd = self.UART0_READ if uart == 0 else self.UART1_READ
-    
-        resp = self._hid_xfer(bytes([cmd]), True)
-    
-        if resp[1] != self.RESP_OK:
-            raise RuntimeError("UART read error")
-    
-        size = resp[2]
-        return bytes(resp[3:3 + size])
-    
-    
-    def uart_read(self, uart):
-        """Read all currently available UART bytes."""
-    
-        if uart not in (0, 1):
-            raise ValueError("UART must be 0 or 1")
-    
-        data = bytearray()
-    
-        while True:
-            chunk = self._uart_read_report(uart)
-    
-            if not chunk:
-                break
-            
-            data.extend(chunk)
-    
-        return bytes(data)
