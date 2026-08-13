@@ -104,7 +104,11 @@ class ControllerBox:
 
     class FsyncOutput(Enum):
         ISOLATED_STROBE = 0
-        M8_FSYNC = 1   
+        M8_FSYNC = 1
+
+    class FsyncDir(Enum):
+        INPUT = 0
+        OUTPUT = 1
 
     def __init__(self):
         """
@@ -522,6 +526,23 @@ class ControllerBox:
     # ----------------------------------------------------------------
     # FSYNC
     # ----------------------------------------------------------------
+    def fsync_controller_set_dir(self, dir: FsyncDir) 
+        if not self.fsync_initialised:
+            raise RuntimeError("FSYNC Controller not initialised.")
+
+        if fw_ver < 1:
+            raise RuntimeError("This function requires a newer firmware version.")
+
+        if dir == self.FsyncDir.Input:
+            duty = 0
+        else if dir == self.FsyncDir.Output:
+            duty = 2048
+        else:
+            raise ValueError("Invalid FSYNC direction")
+
+        self.rp2040.fsync_set_polarity(self.rp2040.FSYNC_CHANNEL_PA1_ID, 0)
+        self.rp2040.fsync_set_duty(self.rp2040.FSYNC_CHANNEL_PA1_ID, duty)
+
     def fsync_controller_get_pin_configuration(self, output: FsyncOutput) -> int:
         if self.fsync_address == self.rp2040.FSYNC_BOOT_ADDRESS:
             raise RuntimeError("FSYNC controller is in bootloader mode. Did you flash the FSYNC controller?")
