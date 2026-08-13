@@ -714,6 +714,19 @@ class ControllerBox:
 
         return self._fsync_stm_to_float(actual_frq)
 
+    def fsync_controller_maxmin_duty_hfstrobe(self, fps: float, polarity: int):
+        if polarity not in (0, 1):
+            raise ValueError("Invalid polarity. Must be 0 or 1.")
+
+        if fps < 0.1 or fps > 600:
+            raise ValueError("FPS must be a value in [0.1, 600]")
+
+        max_duty = (1 / (1 + 1 / fps * (1300 - fps))) * 100
+
+        if polarity == 1:
+            return 100 * (1 - max_duty)
+
+        return 100 * max_duty
 
     def fsync_controller_set_duty_cycle(
         self, duty_cycle: float, output: FsyncOutput
@@ -748,25 +761,6 @@ class ControllerBox:
             self.rp2040.fsync_set_duty(
                 fw_channel, duty_to_set
             )
-
-            cap = self.rp2040.fsync_get_pin_capabilities(fw_pin)
-
-            if cap & self.PIN_CONFIG_TYPE_PWM_HFSTROBE:
-                _, fps = self.rp2040.fsync_get_fps()
-                polarity = self.rp2040.fsync_get_polarity(fw_channel)
-
-                act_duty = duty_cycle / 100.0
-
-                if polarity == 1:
-                    act_duty = 1 - duty_cycle
-
-                if act_duty + act_duty / fps * (1300 - fps) > 1:
-                    max_duty = (1 / (1 + 1 / fps * (1300 - fps))) * 100
-                    if polarity == 0:
-                        raise ValueError(f"Input duty too high for high fps strobe for this frequency and negative polarity. Max is {max_duty} %")
-                    else:
-                        max_duty = 100 - max_duty
-                        raise ValueError(f"Input duty too high for high fps strobe for this frequency and positive polarity. Min is {max_duty} %")
 
             actual = self.rp2040.fsync_get_duty(fw_channel)
 
