@@ -526,7 +526,7 @@ class ControllerBox:
     # ----------------------------------------------------------------
     # FSYNC
     # ----------------------------------------------------------------
-    def fsync_controller_set_dir(self, dir: FsyncDir) 
+    def fsync_controller_set_dir(self, dir: FsyncDir):
         if not self.fsync_initialised:
             raise RuntimeError("FSYNC Controller not initialised.")
 
@@ -618,6 +618,7 @@ class ControllerBox:
                 raise RuntimeError("Failed to initialize FSYNC Controller")
 
             self.fsync_initialised = True
+            self.fsync_controller_set_dir(self.FsyncDir.INPUT)
             return
 
         self.rp2040.i2c_set_port(self.FSYNC_I2C_BUS)
