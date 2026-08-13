@@ -530,7 +530,7 @@ class ControllerBox:
         if not self.fsync_initialised:
             raise RuntimeError("FSYNC Controller not initialised.")
 
-        if fw_ver < 1:
+        if self.fw_ver < 1:
             raise RuntimeError("This function requires a newer firmware version.")
 
         if dir == self.FsyncDir.Input:
