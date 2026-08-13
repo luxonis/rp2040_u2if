@@ -167,6 +167,10 @@ class RP2040_u2if:
     FSYNC_PIN_CONFIG_TYPE_ADC = 4
     FSYNC_PIN_CONFIG_TYPE_PWM_KEEPAWAKE = 8
     FSYNC_PIN_CONFIG_TYPE_PWM_1200PAD = 16
+
+    class FsyncDir(Enum):
+        INPUT = 0
+        OUTPUT = 1
     
     def __init__(self):
         self._vid = None
@@ -864,6 +868,17 @@ class RP2040_u2if:
     # ----------------------------------------------------------------
     # FSYNC CONTROLLER
     # ----------------------------------------------------------------
+    def fsync_set_dir(self, dir: FsyncDir):
+        if dir == self.FsyncDir.INPUT:
+            duty = 0
+        elif dir == self.FsyncDir.OUTPUT:
+            duty = 2048
+        else:
+            raise ValueError("Invalid FSYNC direction")
+
+        self.fsync_set_polarity(self.FSYNC_CHANNEL_PA1_ID, 0)
+        self.fsync_set_duty(self.FSYNC_CHANNEL_PA1_ID, duty)
+
     def fsync_init(self):
         """Initialize the FSYNC controller."""
         resp = self._hid_xfer(bytes([self.FSYNC_INIT]), True)

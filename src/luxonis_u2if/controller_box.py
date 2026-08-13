@@ -106,10 +106,6 @@ class ControllerBox:
         ISOLATED_STROBE = 0
         M8_FSYNC = 1
 
-    class FsyncDir(Enum):
-        INPUT = 0
-        OUTPUT = 1
-
     def __init__(self):
         """
         Initialize ControllerBox device.
@@ -526,22 +522,6 @@ class ControllerBox:
     # ----------------------------------------------------------------
     # FSYNC
     # ----------------------------------------------------------------
-    def fsync_controller_set_dir(self, dir: FsyncDir):
-        if not self.fsync_initialised:
-            raise RuntimeError("FSYNC Controller not initialised.")
-
-        if self.fw_ver < 1:
-            raise RuntimeError("This function requires a newer firmware version.")
-
-        if dir == self.FsyncDir.INPUT:
-            duty = 0
-        elif dir == self.FsyncDir.OUTPUT:
-            duty = 2048
-        else:
-            raise ValueError("Invalid FSYNC direction")
-
-        self.rp2040.fsync_set_polarity(self.rp2040.FSYNC_CHANNEL_PA1_ID, 0)
-        self.rp2040.fsync_set_duty(self.rp2040.FSYNC_CHANNEL_PA1_ID, duty)
 
     def fsync_controller_get_pin_configuration(self, output: FsyncOutput) -> int:
         if self.fsync_address == self.rp2040.FSYNC_BOOT_ADDRESS:
@@ -617,8 +597,8 @@ class ControllerBox:
             if self.rp2040.fsync_get_mode() != self.rp2040.FSYNC_MODE_INPUT:
                 raise RuntimeError("Failed to initialize FSYNC Controller")
 
+            self.rp2040.fsync_set_dir(self.rp2040.FsyncDir.INPUT)
             self.fsync_initialised = True
-            self.fsync_controller_set_dir(self.FsyncDir.INPUT)
             return
 
         self.rp2040.i2c_set_port(self.FSYNC_I2C_BUS)
@@ -685,7 +665,13 @@ class ControllerBox:
         )
 
         if use_fw_api:
+            if mode == self.FsyncMode.MASTER_OUTPUT:
+                direction = self.rp2040.FsyncDir.OUTPUT
+            else:
+                direction = self.rp2040.FsyncDir.INPUT
+
             self.rp2040.fsync_set_mode(fw_mode)
+            self.rp2040.fsync_set_dir(direction)
 
             if self.rp2040.fsync_get_mode() != fw_mode:
                 raise RuntimeError("Failed to set FsyncMode")
