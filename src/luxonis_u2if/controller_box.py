@@ -721,7 +721,7 @@ class ControllerBox:
         if fps < 0.1 or fps > 600:
             raise ValueError("FPS must be a value in [0.1, 600]")
 
-        max_duty = (1 / (1 + 1 / fps * (1300 - fps))) * 100
+        max_duty = 1 / (1 + 1 / fps * (1300 - fps))
 
         if polarity == 1:
             return 100 * (1 - max_duty)
