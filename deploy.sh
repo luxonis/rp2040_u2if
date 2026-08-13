@@ -14,7 +14,7 @@ echo "Deploying to $DEVICE_IP"
 mkdir -p deploy_m8
 cp -r src deploy_m8
 cp candleLight_fw.bin deploy_m8 # taken from https://github.com/candle-usb/candleLight_fw/releases/download/v2.0/candleLight.v2.0.7z commit hash: 51637c9bf6b6317bdaf40fca80bbda150dc179b6
-cp u2if_MD6976_R0.uf2 deploy_m8 # taken from https://github.com/luxonis/u2if/tree/md6976_r0_support commit hash 519cd8941c2311ab7fb8cc339bc25be02ec8f231
+cp u2if_MD6976.uf2 deploy_m8 # taken from https://github.com/luxonis/u2if/tree/md6976_r0_support commit hash 519cd8941c2311ab7fb8cc339bc25be02ec8f231
 cp program-fsync-controller-m8-box.sh deploy_m8
 cp requirements.txt deploy_m8
 cp set_prog_state_can.py deploy_m8
