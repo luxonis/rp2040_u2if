@@ -20,6 +20,9 @@ class RP2040_u2if:
 
     # MISC
     RESP_OK = 0x01
+    RESP_NOK = 0x02
+    RESP_NOT_CONCERNED = 0xFF
+
     SYS_RESET = 0x10
 
     # GPIO
@@ -99,6 +102,72 @@ class RP2040_u2if:
     UART1_WRITE = UART0_WRITE + UART0_UART1_OFFSET
     UART1_READ = UART0_READ + UART0_UART1_OFFSET
 
+    # FSYNC CONTROLLER
+    FSYNC_ADDRESS = 0x12
+    FSYNC_BOOT_ADDRESS = 0x56
+
+    FSYNC_RST_PIN = 64 + 14
+
+    FSYNC_INIT = 0xE0
+    FSYNC_PROBE = 0xE1
+    FSYNC_GETPINCAPABILITIES = 0xE2
+    FSYNC_SETPINCAPABILITIES = 0xE3
+    FSYNC_GETMODE = 0xE4
+    FSYNC_SETMODE = 0xE5
+    FSYNC_GETFPS = 0xE6
+    FSYNC_SETFPS = 0xE7
+    FSYNC_GETDUTY = 0xE8
+    FSYNC_SETDUTY = 0xE9
+    FSYNC_GETPOLARITY = 0xEA
+    FSYNC_SETPOLARITY = 0xEB
+    FSYNC_GETINPUTINFO = 0xEC
+
+    FSYNC_MODE_INPUT = 0
+    FSYNC_MODE_MASTER = 1
+    FSYNC_MODE_SLAVE = 2
+
+    FSYNC_CHANNEL_PB1_ID = 0
+    FSYNC_CHANNEL_PA4_ID = 1
+    FSYNC_CHANNEL_PA1_ID = 2
+    FSYNC_CHANNEL_PB0_ID = 3
+    FSYNC_CHANNEL_PA8_ID = 4
+    FSYNC_CHANNEL_PA5_ID = 5
+    FSYNC_CHANNEL_PA6_ID = 6
+    FSYNC_CHANNEL_PA7_ID = 7
+    FSYNC_CHANNEL_PA3_ID = 8
+    FSYNC_CHANNEL_PC6_ID = 9
+    FSYNC_CHANNEL_PB8_ID = 10
+    FSYNC_CHANNEL_PA11_ID = 11
+    FSYNC_CHANNEL_PB5_ID = 12
+
+    FSYNC_PIN_PA0_ID = 0
+    FSYNC_PIN_PA1_ID = 1
+    FSYNC_PIN_PA2_ID = 2
+    FSYNC_PIN_PA3_ID = 3
+    FSYNC_PIN_PA4_ID = 4
+    FSYNC_PIN_PA5_ID = 5
+    FSYNC_PIN_PA6_ID = 6
+    FSYNC_PIN_PA7_ID = 7
+    FSYNC_PIN_PA8_ID = 8
+    FSYNC_PIN_PA11_ID = 9
+    FSYNC_PIN_PA12_ID = 10
+    FSYNC_PIN_PA13_ID = 11
+    FSYNC_PIN_PA14_ID = 12
+    FSYNC_PIN_PA15_ID = 13
+    FSYNC_PIN_PB0_ID = 14
+    FSYNC_PIN_PB1_ID = 15
+    FSYNC_PIN_PB3_ID = 16
+    FSYNC_PIN_PB4_ID = 17
+    FSYNC_PIN_PB5_ID = 18
+    FSYNC_PIN_PB8_ID = 19
+    FSYNC_PIN_PC6_ID = 20
+    
+    FSYNC_PIN_CONFIG_TYPE_HIGH_Z = 1
+    FSYNC_PIN_CONFIG_TYPE_PWM = 2
+    FSYNC_PIN_CONFIG_TYPE_ADC = 4
+    FSYNC_PIN_CONFIG_TYPE_PWM_KEEPAWAKE = 8
+    FSYNC_PIN_CONFIG_TYPE_PWM_1200PAD = 16
+    
     def __init__(self):
         self._vid = None
         self._pid = None
@@ -153,12 +222,45 @@ class RP2040_u2if:
         self._hid.open(self._vid, self._pid, self._serial)
         if RP2040_U2IF_RESET_DELAY >= 0:
             self._reset()
+
+        # reset stm
+        self.gpio_init_pin(
+            self.FSYNC_RST_PIN, self.GPIO_OUT, self.GPIO_PULL_NONE
+        )
+
+        self.gpio_set_pin(self.FSYNC_RST_PIN, 0)
+        time.sleep(0.1)
+        self.gpio_set_pin(self.FSYNC_RST_PIN, 1)
+        time.sleep(0.1)
+        self.gpio_set_pin(self.FSYNC_RST_PIN, 0)
+
+        """
+        This is diabolical. For some unknown reason, the first query always fails.
+        So we're basically just issuing a random query to get around this.
+        """
+        self._hid_xfer(
+            bytes([self.FSYNC_GETPINCAPABILITIES, 3]),
+            True,
+        )
+
         self._opened = True
 
     def close(self):
         """Close HID interface."""
         if not self._opened:
             return
+
+        # reset stm
+        self.gpio_init_pin(
+            self.FSYNC_RST_PIN, self.GPIO_OUT, self.GPIO_PULL_NONE
+        )
+
+        self.gpio_set_pin(self.FSYNC_RST_PIN, 0)
+        time.sleep(0.1)
+        self.gpio_set_pin(self.FSYNC_RST_PIN, 1)
+        time.sleep(0.1)
+        self.gpio_set_pin(self.FSYNC_RST_PIN, 0)
+
         self._hid_xfer(bytes([self.SYS_RESET]), True)
         self._hid.close()
         self._opened = False
@@ -295,10 +397,16 @@ class RP2040_u2if:
     # ----------------------------------------------------------------
     # I2C
     # ----------------------------------------------------------------
-    def i2c_configure(self, baudrate, pullup=False):
+    def i2c_configure(self, baudrate, sda, scl, pullup=False):
         """Configure I2C."""
         if self._i2c_index is None:
             raise RuntimeError("I2C bus not initialized.")
+
+        if sda not in [0, 4, 8, 12, 16, 20, 24, 28]:
+            raise RuntimeError("Invalid SDA pin")
+
+        if scl not in [1, 5, 9, 13, 17, 21, 25, 29]:
+            raise RuntimeError("Invalid SCL pin")
 
         resp = self._hid_xfer(
             bytes(
@@ -307,7 +415,9 @@ class RP2040_u2if:
                     0x00 if not pullup else 0x01,
                 ]
             )
-            + baudrate.to_bytes(4, byteorder="little"),
+            + baudrate.to_bytes(4, byteorder="little")
+            + sda.to_bytes(4, byteorder="little")
+            + scl.to_bytes(4, byteorder="little"),
             True,
         )
         if resp[1] != self.RESP_OK:
@@ -750,3 +860,187 @@ class RP2040_u2if:
         )
         if resp[1] != self.RESP_OK:
             raise RuntimeError("PWM set duty cycle error.")
+    
+    # ----------------------------------------------------------------
+    # FSYNC CONTROLLER
+    # ----------------------------------------------------------------
+    def fsync_init(self):
+        """Initialize the FSYNC controller."""
+        resp = self._hid_xfer(bytes([self.FSYNC_INIT]), True)
+        if resp[1] != self.RESP_OK:
+            raise RuntimeError("FSYNC init error.")
+
+    def fsync_probe(self):
+        """
+        Probe for the FSYNC controller.
+
+        Returns
+        -------
+        tuple
+            (i2c_bus, address, firmware_version)
+        """
+        resp = self._hid_xfer(bytes([self.FSYNC_PROBE]), True)
+        if resp[1] != self.RESP_OK:
+            raise RuntimeError("FSYNC controller not found.")
+
+        i2c_bus = resp[2]
+        address = resp[3]
+        firmware_version = int.from_bytes(
+            resp[4:8], byteorder="little", signed=False
+        )
+
+        return i2c_bus, address, firmware_version
+
+    def fsync_get_pin_capabilities(self, pin):
+        """Get FSYNC pin capability."""
+        resp = self._hid_xfer(
+            bytes([self.FSYNC_GETPINCAPABILITIES, pin]),
+            True,
+        )
+        if resp[1] != self.RESP_OK:
+            raise RuntimeError("FSYNC get pin capabilities error.")
+
+        return int.from_bytes(
+            resp[2:6], byteorder="little", signed=False
+        )
+
+    def fsync_set_pin_capabilities(self, pin, capability):
+        """Set FSYNC pin capability."""
+        resp = self._hid_xfer(
+            bytes([self.FSYNC_SETPINCAPABILITIES, pin])
+            + int(capability).to_bytes(4, byteorder="little", signed=False),
+            True,
+        )
+
+        if resp[1] != self.RESP_OK:
+            error = resp[2]
+
+            if error == 1:
+                raise RuntimeError("FSYNC pin capability I2C error.")
+            if error == 2:
+                raise RuntimeError("FSYNC controller already initialized.")
+            if error == 3:
+                raise ValueError("Invalid FSYNC pin or capability.")
+
+            raise RuntimeError("FSYNC set pin capabilities error.")
+
+    def fsync_get_mode(self):
+        """Get FSYNC controller mode."""
+        resp = self._hid_xfer(bytes([self.FSYNC_GETMODE]), True)
+        if resp[1] != self.RESP_OK:
+            raise RuntimeError("FSYNC get mode error.")
+
+        return int.from_bytes(
+            resp[2:6], byteorder="little", signed=False
+        )
+
+    def fsync_set_mode(self, mode):
+        """Set FSYNC controller mode."""
+        resp = self._hid_xfer(
+            bytes([self.FSYNC_SETMODE])
+            + int(mode).to_bytes(4, byteorder="little", signed=False),
+            True,
+        )
+        if resp[1] != self.RESP_OK:
+            raise RuntimeError("FSYNC set mode error.")
+
+    def fsync_get_fps(self):
+        """
+        Get FSYNC frequencies.
+
+        Returns
+        -------
+        tuple
+            (requested_fps, actual_fps)
+        """
+        import struct
+
+        resp = self._hid_xfer(bytes([self.FSYNC_GETFPS]), True)
+        if resp[1] != self.RESP_OK:
+            raise RuntimeError("FSYNC get FPS error.")
+
+        requested_fps = struct.unpack("<f", bytes(resp[2:6]))[0]
+        actual_fps = struct.unpack("<f", bytes(resp[6:10]))[0]
+
+        return requested_fps, actual_fps
+
+    def fsync_set_fps(self, fps):
+        """Set FSYNC output frequency in frames per second."""
+        import struct
+
+        resp = self._hid_xfer(
+            bytes([self.FSYNC_SETFPS]) + struct.pack("<f", float(fps)),
+            True,
+        )
+        if resp[1] != self.RESP_OK:
+            raise RuntimeError("FSYNC set FPS error.")
+
+    def fsync_get_duty(self, channel):
+        """Get FSYNC channel duty value."""
+        resp = self._hid_xfer(
+            bytes([self.FSYNC_GETDUTY, channel]),
+            True,
+        )
+        if resp[1] != self.RESP_OK:
+            raise RuntimeError("FSYNC get duty error.")
+
+        return int.from_bytes(
+            resp[2:6], byteorder="little", signed=False
+        )
+
+    def fsync_set_duty(self, channel, duty):
+        """Set FSYNC channel duty value."""
+        resp = self._hid_xfer(
+            bytes([self.FSYNC_SETDUTY, channel])
+            + int(duty).to_bytes(4, byteorder="little", signed=False),
+            True,
+        )
+        if resp[1] != self.RESP_OK:
+            raise RuntimeError("FSYNC set duty error.")
+
+    def fsync_get_polarity(self, channel):
+        """Get FSYNC channel polarity."""
+        resp = self._hid_xfer(
+            bytes([self.FSYNC_GETPOLARITY, channel]),
+            True,
+        )
+        if resp[1] != self.RESP_OK:
+            raise RuntimeError("FSYNC get polarity error.")
+
+        return int.from_bytes(
+            resp[2:6], byteorder="little", signed=False
+        )
+
+    def fsync_set_polarity(self, channel, polarity):
+        """Set FSYNC channel polarity."""
+        resp = self._hid_xfer(
+            bytes([self.FSYNC_SETPOLARITY, channel])
+            + int(polarity).to_bytes(4, byteorder="little", signed=False),
+            True,
+        )
+        if resp[1] != self.RESP_OK:
+            raise RuntimeError("FSYNC set polarity error.")
+
+    def fsync_get_input_info(self):
+        """
+        Get FSYNC input information.
+
+        Returns
+        -------
+        tuple
+            (present, fps, duty)
+        """
+        import struct
+
+        resp = self._hid_xfer(bytes([self.FSYNC_GETINPUTINFO]), True)
+        if resp[1] != self.RESP_OK:
+            raise RuntimeError("FSYNC get input info error.")
+
+        present = bool(resp[2])
+        fps = struct.unpack("<f", bytes(resp[3:7]))[0]
+        duty = int.from_bytes(
+            resp[7:11], byteorder="little", signed=False
+        )
+
+        return present, fps, duty
+
