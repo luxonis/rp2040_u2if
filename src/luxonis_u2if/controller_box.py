@@ -533,9 +533,9 @@ class ControllerBox:
         if self.fw_ver < 1:
             raise RuntimeError("This function requires a newer firmware version.")
 
-        if dir == self.FsyncDir.Input:
+        if dir == self.FsyncDir.INPUT:
             duty = 0
-        elif dir == self.FsyncDir.Output:
+        elif dir == self.FsyncDir.OUTPUT:
             duty = 2048
         else:
             raise ValueError("Invalid FSYNC direction")
