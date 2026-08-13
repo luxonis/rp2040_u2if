@@ -535,7 +535,7 @@ class ControllerBox:
 
         if dir == self.FsyncDir.Input:
             duty = 0
-        else if dir == self.FsyncDir.Output:
+        elif dir == self.FsyncDir.Output:
             duty = 2048
         else:
             raise ValueError("Invalid FSYNC direction")
