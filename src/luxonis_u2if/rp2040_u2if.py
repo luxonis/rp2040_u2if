@@ -7,6 +7,7 @@
 import os
 import time
 import hid
+from enum import Enum
 
 # Use to set delay between reset and device reopen. if negative, don't reset at all
 RP2040_U2IF_RESET_DELAY = float(os.environ.get("RP2040_U2IF_RESET_DELAY", 1))
