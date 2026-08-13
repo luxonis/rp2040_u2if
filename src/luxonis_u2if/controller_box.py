@@ -714,6 +714,11 @@ class ControllerBox:
 
         return self._fsync_stm_to_float(actual_frq)
 
+    """
+    This is a seperate function in order not to block the code in case the stm is in slave mode.
+    To ensure the intended operation of the HFSTROBE mode this function should be called
+    in order to get the maximum (polarity 0) or minimum (polarity 1) duty that should be passed.
+    """
     def fsync_controller_maxmin_hfstrobe_duty(self, fps: float, polarity: int):
         if polarity not in (0, 1):
             raise ValueError("Invalid polarity. Must be 0 or 1.")
