@@ -714,7 +714,7 @@ class ControllerBox:
 
         return self._fsync_stm_to_float(actual_frq)
 
-    def fsync_controller_maxmin_duty_hfstrobe(self, fps: float, polarity: int):
+    def fsync_controller_maxmin_hfstrobe_duty(self, fps: float, polarity: int):
         if polarity not in (0, 1):
             raise ValueError("Invalid polarity. Must be 0 or 1.")
 
