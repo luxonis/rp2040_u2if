@@ -62,13 +62,40 @@ class ControllerBox:
     BUTTON_PINS = [19, 20, 21]
 
     # ----------------------------------------------------------------
-    # FSYNC CONTROLLER
+    # I2C
     # ----------------------------------------------------------------
 
+    VALID_SDA_GPIO = (1, 5, 9, 13)
+    VALID_SCL_GPIO = (2, 6, 10, 14)
+
+    # ----------------------------------------------------------------
+    # FSYNC CONTROLLER (legacy)
+    # ----------------------------------------------------------------
+    FSYNC_SDA = 28
+    FSYNC_SCL = 29
+
     FSYNC_I2C_BUS = 0
-    FSYNC_I2C_CLK_SPEED = 400000
+    FSYNC_I2C_CLK_SPEED = 100000
     FSYNC_CONTROLLER_ADDR = 0x12
     FSYNC_CONTROLLER_DATA_ENDIAN = "<"
+
+    # ----------------------------------------------------------------
+    # FSYNC CONTROLLER
+    # ----------------------------------------------------------------
+  
+    PIN_CONFIG_TYPE_HIGH_Z = 1
+    PIN_CONFIG_TYPE_PWM = 2
+    PIN_CONFIG_TYPE_ADC = 4
+    PIN_CONFIG_TYPE_PWM_KEEPAWAKE = 8
+    PIN_CONFIG_TYPE_PWM_HFSTROBE = 16
+
+    fsync_bus = 0
+    fsync_address = FSYNC_CONTROLLER_ADDR
+    fsync_version = 14
+
+    fsync_initialised = False
+
+    fw_ver = 0
 
     class FsyncMode(Enum):
         MASTER_INPUT = 0
@@ -91,6 +118,22 @@ class ControllerBox:
         self._btn_thread = None
         self._running = False
 
+        reply = self.rp2040._hid_xfer(
+            bytes([self.rp2040.FSYNC_PROBE]),
+            True,
+        )[1]
+
+        if reply == self.rp2040.RESP_NOT_CONCERNED:
+            self.fw_ver = 0
+        else:
+            self.fw_ver = 1
+        
+        if self.fw_ver == 1:
+            fsync_probe_result = self.rp2040.fsync_probe()
+            self.fsync_bus = fsync_probe_result[0]
+            self.fsync_address = fsync_probe_result[1]
+            self.fsync_version = fsync_probe_result[2]
+            
     def close(self):
         self._running = False
         if self._btn_thread:
@@ -98,7 +141,7 @@ class ControllerBox:
         self.rp2040.close()
 
     # ----------------------------------------------------------------
-    # FSYNC helpers
+    # FSYNC helpers (legacy)
     # ----------------------------------------------------------------
 
     @staticmethod
@@ -384,114 +427,413 @@ class ControllerBox:
         return self.rp2040.uart_read(1)
 
     # ----------------------------------------------------------------
+    # I2C
+    # ----------------------------------------------------------------
+
+    def i2c_init(self, baudrate: int, sda: int, scl: int, pullup: bool = False):
+        if self.fsync_initialised and self.fsync_bus == 0:
+            raise RuntimeError(
+                "Cannot initialize I2C bus 0: FSYNC Controller is already initialized on bus 0."
+            )
+
+        if sda not in self.VALID_SDA_GPIO:
+            raise ValueError(f"Invalid I2C SDA pin: {sda}")
+
+        if scl not in self.VALID_SCL_GPIO:
+            raise ValueError(f"Invalid I2C SCL pin: {scl}")
+
+        sda_gpio = self.map_gpio(sda)
+        scl_gpio = self.map_gpio(scl)
+    
+        self.rp2040.i2c_set_port(0)
+        self.rp2040.i2c_configure(baudrate, sda_gpio, scl_gpio, pullup)
+
+    def i2c_write(self, address: int, data, *, start: int = 0, end=None):
+        """Write data to an I2C device on bus 0."""
+        if self.rp2040._i2c_index != 0:
+            raise RuntimeError("I2C bus 0 is not initialized.")
+    
+        if isinstance(data, list):
+            data = bytes(data)
+    
+        self.rp2040.i2c_writeto(
+            address,
+            data,
+            start=start,
+            end=end,
+        )
+    
+    def i2c_read(self, address: int, length: int) -> bytes:
+        """Read a number of bytes from an I2C device on bus 0."""
+        if self.rp2040._i2c_index != 0:
+            raise RuntimeError("I2C bus 0 is not initialized.")
+    
+        buffer = bytearray(length)
+    
+        self.rp2040.i2c_readfrom_into(
+            address,
+            buffer,
+        )
+    
+        return bytes(buffer)
+    
+    def i2c_write_read(
+        self,
+        address: int,
+        write_data,
+        read_length: int,
+    ) -> bytes:
+        """Write to an I2C device and perform a repeated-start read."""
+        if self.rp2040._i2c_index != 0:
+            raise RuntimeError("I2C bus 0 is not initialized.")
+    
+        if isinstance(write_data, list):
+            write_data = bytes(write_data)
+    
+        read_buffer = bytearray(read_length)
+    
+        self.rp2040.i2c_writeto_then_readfrom(
+            address,
+            write_data,
+            read_buffer,
+        )
+    
+        return bytes(read_buffer)
+    
+    def i2c_scan(self, start: int = 0x08, end: int = 0x77):
+        """Scan for I2C devices on bus 0."""
+        if self.rp2040._i2c_index != 0:
+            raise RuntimeError("I2C bus 0 is not initialized.")
+    
+        if not 0 <= start <= 0x7F:
+            raise ValueError("Invalid I2C start address.")
+    
+        if not 0 <= end <= 0x7F:
+            raise ValueError("Invalid I2C end address.")
+    
+        if start > end:
+            raise ValueError("I2C start address must not be greater than end address.")
+    
+        return self.rp2040.i2c_scan(
+            start=start,
+            end=end,
+        )
+    
+    # ----------------------------------------------------------------
     # FSYNC
     # ----------------------------------------------------------------
 
+    def fsync_controller_get_pin_configuration(self, output: FsyncOutput) -> int:
+        if self.fsync_address == self.rp2040.FSYNC_BOOT_ADDRESS:
+            raise RuntimeError("FSYNC controller is in bootloader mode. Did you flash the FSYNC controller?")
+
+        if output == self.FsyncOutput.ISOLATED_STROBE:
+            fw_pin = self.rp2040.FSYNC_PIN_PB0_ID
+        elif output == self.FsyncOutput.M8_FSYNC:
+            fw_pin = self.rp2040.FSYNC_PIN_PA11_ID
+        else:
+            raise ValueError("Invalid FsyncOutput")
+    
+        if self.fw_ver == 1:
+            return self.rp2040.fsync_get_pin_capabilities(fw_pin)
+    
+        raise NotImplementedError(
+            "FSYNC pin configuration is not supported by the legacy interface."
+        )
+    
+    def fsync_controller_set_pin_configuration(
+        self, cfg: int, output: FsyncOutput
+    ) -> int:
+        if self.fsync_address == self.rp2040.FSYNC_BOOT_ADDRESS:
+            raise RuntimeError("FSYNC controller is in bootloader mode. Did you flash the FSYNC controller?")
+
+        if self.fsync_initialised:
+            raise RuntimeError("FSYNC Controller already initialised, the configuration must be set before the fsync initialisation.")
+    
+        if output == self.FsyncOutput.ISOLATED_STROBE:
+            fw_pin = self.rp2040.FSYNC_PIN_PB0_ID
+        elif output == self.FsyncOutput.M8_FSYNC:
+            fw_pin = self.rp2040.FSYNC_PIN_PA11_ID
+        else:
+            raise ValueError("Invalid FsyncOutput")
+  
+        mask = (self.PIN_CONFIG_TYPE_HIGH_Z 
+        | self.PIN_CONFIG_TYPE_PWM 
+        | self.PIN_CONFIG_TYPE_ADC 
+        | self.PIN_CONFIG_TYPE_PWM_KEEPAWAKE
+        | self.PIN_CONFIG_TYPE_PWM_HFSTROBE)
+
+        if (cfg & (cfg - 1)) != 0 or (cfg & mask) == 0:
+            raise ValueError("Invalid pin configuration")
+
+        if self.fw_ver == 1:
+            self.rp2040.fsync_set_pin_capabilities(fw_pin, cfg)
+    
+            actual = self.rp2040.fsync_get_pin_capabilities(fw_pin)
+            if actual != cfg:
+                raise RuntimeError("Failed to set FSYNC pin configuration")
+    
+            return actual
+    
+        raise NotImplementedError(
+            "FSYNC pin configuration is not supported by the legacy interface."
+        )
+
     def fsync_controller_init(self):
+        if self.fsync_address == self.rp2040.FSYNC_BOOT_ADDRESS:
+            raise RuntimeError("FSYNC controller is in bootloader mode. Did you flash the FSYNC controller?")
+
+        use_fw_api = (
+            self.fw_ver == 1
+        )
+        
+        if self.rp2040._i2c_index == self.fsync_bus: 
+            raise RuntimeError("I2C bus already reconfigured. But the FSYNC Controller uses this bus on this revision.")
+
+        if use_fw_api:
+            self.rp2040.fsync_init()
+            self.rp2040.fsync_set_mode(self.rp2040.FSYNC_MODE_INPUT)
+
+            if self.rp2040.fsync_get_mode() != self.rp2040.FSYNC_MODE_INPUT:
+                raise RuntimeError("Failed to initialize FSYNC Controller")
+
+            self.rp2040.fsync_set_dir(self.rp2040.FsyncDir.INPUT)
+            self.fsync_initialised = True
+            return
 
         self.rp2040.i2c_set_port(self.FSYNC_I2C_BUS)
-        self.rp2040.i2c_configure(self.FSYNC_I2C_CLK_SPEED)
+        self.rp2040.i2c_configure(
+            self.FSYNC_I2C_CLK_SPEED, self.FSYNC_SDA, self.FSYNC_SCL
+        )
 
         slaves = self.rp2040.i2c_scan(
-            start=self.FSYNC_CONTROLLER_ADDR, end=self.FSYNC_CONTROLLER_ADDR + 1
+            start=self.FSYNC_CONTROLLER_ADDR,
+            end=self.FSYNC_CONTROLLER_ADDR + 1,
         )
 
         if self.FSYNC_CONTROLLER_ADDR not in slaves:
             raise RuntimeError("FSYNC Controller not found")
 
         self._fsync_stm_write(
-            self.FSYNC_STM_CONFIG_REG + self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT
+            self.FSYNC_STM_CONFIG_REG
+            + self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT
         )
 
         mode = self._fsync_stm_read(self.FSYNC_STM_CONFIG_REG)
 
         if mode != self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT:
+            self._fsync_stm_write(
+                self.FSYNC_STM_FW_VERSION_REG
+                + self.FSYNC_STM_UNLOCK_MAGIC
+            )
 
             self._fsync_stm_write(
-                self.FSYNC_STM_FW_VERSION_REG + self.FSYNC_STM_UNLOCK_MAGIC
-            )
-            self._fsync_stm_write(
-                self.FSYNC_STM_CONFIG_REG + self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT
+                self.FSYNC_STM_CONFIG_REG
+                + self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT
             )
 
             mode = self._fsync_stm_read(self.FSYNC_STM_CONFIG_REG)
 
-            if mode != self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT:
-                raise RuntimeError("Unable to unlock FSYNC Controller")
+        if mode != self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT:
+            raise RuntimeError("Unable to unlock FSYNC Controller")
 
         self._fsync_stm_write(
-            self.FSYNC_STM_CONFIG_REG + self.FSYNC_STM_CONFIG_REG_MASTER_INPUT
+            self.FSYNC_STM_CONFIG_REG
+            + self.FSYNC_STM_CONFIG_REG_MASTER_INPUT
         )
 
+        self.fsync_initialised = True
+
     def fsync_controller_set_mode(self, mode: FsyncMode):
+        if not self.fsync_initialised:
+            raise RuntimeError("FSYNC Controller not initialised.")
 
         if mode == self.FsyncMode.MASTER_INPUT:
-            mode_to_set = self.FSYNC_STM_CONFIG_REG_MASTER_INPUT
+            fw_mode = self.rp2040.FSYNC_MODE_INPUT
+            legacy_mode = self.FSYNC_STM_CONFIG_REG_MASTER_INPUT
         elif mode == self.FsyncMode.MASTER_OUTPUT:
-            mode_to_set = self.FSYNC_STM_CONFIG_REG_MASTER_OUTPUT
+            fw_mode = self.rp2040.FSYNC_MODE_MASTER
+            legacy_mode = self.FSYNC_STM_CONFIG_REG_MASTER_OUTPUT
         elif mode == self.FsyncMode.SLAVE:
-            mode_to_set = self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT
+            fw_mode = self.rp2040.FSYNC_MODE_SLAVE
+            legacy_mode = self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT
         else:
             raise ValueError("Invalid FsyncMode")
 
-        self._fsync_stm_write(self.FSYNC_STM_CONFIG_REG + mode_to_set)
+        use_fw_api = (
+            self.fw_ver == 1
+        )
+
+        if use_fw_api:
+            if mode == self.FsyncMode.MASTER_OUTPUT:
+                direction = self.rp2040.FsyncDir.OUTPUT
+            else:
+                direction = self.rp2040.FsyncDir.INPUT
+
+            self.rp2040.fsync_set_mode(fw_mode)
+            self.rp2040.fsync_set_dir(direction)
+
+            if self.rp2040.fsync_get_mode() != fw_mode:
+                raise RuntimeError("Failed to set FsyncMode")
+            return
+
+        self._fsync_stm_write(
+            self.FSYNC_STM_CONFIG_REG + legacy_mode
+        )
 
         read_mode = self._fsync_stm_read(self.FSYNC_STM_CONFIG_REG)
 
-        if read_mode != mode_to_set:
+        if read_mode != legacy_mode:
             raise RuntimeError("Failed to set FsyncMode")
 
+
     def fsync_controller_set_frequency(self, freq: float) -> float:
+        if not self.fsync_initialised:
+            raise RuntimeError("FSYNC Controller not initialised.")
+
+        # Preserve the legacy public API validation (0..600 Hz).
+        freq_to_set = self._fsync_stm_internal_frequency(freq)
+
+        use_fw_api = (
+            self.fw_ver == 1
+        )
+
+        if self.fw_ver == 1:
+            self.rp2040.fsync_set_fps(freq)
+            _, actual_freq = self.rp2040.fsync_get_fps()
+            return actual_freq
 
         self._fsync_stm_write(
             self.FSYNC_STM_INTERNAL_FREQUENCY_REG
-            + self._fsync_stm_internal_frequency(freq)
+            + freq_to_set
         )
 
-        actual_frq = self._fsync_stm_read(self.FSYNC_STM_ACTUAL_FREQUENCY_REG)
+        actual_frq = self._fsync_stm_read(
+            self.FSYNC_STM_ACTUAL_FREQUENCY_REG
+        )
 
         return self._fsync_stm_to_float(actual_frq)
+
+    """
+    This is a seperate function in order not to block the code in case the stm is in slave mode.
+    To ensure the intended operation of the HFSTROBE mode this function should be called
+    in order to get the maximum (polarity 0) or minimum (polarity 1) duty that should be passed.
+    """
+    def fsync_controller_maxmin_hfstrobe_duty(self, fps: float, polarity: int):
+        if polarity not in (0, 1):
+            raise ValueError("Invalid polarity. Must be 0 or 1.")
+
+        if fps < 0.1 or fps > 600:
+            raise ValueError("FPS must be a value in [0.1, 600]")
+
+        max_duty = 1 / (1 + 1 / fps * (1300 - fps))
+
+        if polarity == 1:
+            return 100 * (1 - max_duty)
+
+        return 100 * max_duty
 
     def fsync_controller_set_duty_cycle(
         self, duty_cycle: float, output: FsyncOutput
     ) -> float:
+        if not self.fsync_initialised:
+            raise RuntimeError("FSYNC Controller not initialised.")
 
         if output == self.FsyncOutput.ISOLATED_STROBE:
-            output_to_set = self.FSYNC_STM_OUTPUT_3_DUTY_CYCLE
+            fw_pin = self.rp2040.FSYNC_PIN_PB0_ID
+            fw_channel = self.rp2040.FSYNC_CHANNEL_PB0_ID
+            legacy_output = self.FSYNC_STM_OUTPUT_3_DUTY_CYCLE
         elif output == self.FsyncOutput.M8_FSYNC:
-            output_to_set = self.FSYNC_STM_OUTPUT_11_DUTY_CYCLE
+            fw_pin = self.rp2040.FSYNC_PIN_PA11_ID
+            fw_channel = self.rp2040.FSYNC_CHANNEL_PA11_ID
+            legacy_output = self.FSYNC_STM_OUTPUT_11_DUTY_CYCLE
         else:
             raise ValueError("Invalid FsyncOutput")
 
-        duty_cycle_to_set = self._fsync_stm_output_duty_cycle(duty_cycle)
+        duty_cycle_to_set = self._fsync_stm_output_duty_cycle(
+            duty_cycle
+        )
 
-        self._fsync_stm_write(output_to_set + duty_cycle_to_set)
+        use_fw_api = (
+            self.fw_ver == 1
+        )
 
-        actual = self._fsync_stm_to_int(self._fsync_stm_read(output_to_set))
+        if use_fw_api:
+            duty_to_set = self._fsync_stm_to_int(
+                duty_cycle_to_set
+            )
+
+            self.rp2040.fsync_set_duty(
+                fw_channel, duty_to_set
+            )
+
+            actual = self.rp2040.fsync_get_duty(fw_channel)
+
+            return 100.0 * actual / 2048.0
+
+        self._fsync_stm_write(
+            legacy_output + duty_cycle_to_set
+        )
+
+        actual = self._fsync_stm_to_int(
+            self._fsync_stm_read(legacy_output)
+        )
 
         return 100.0 * actual / 2048.0
 
-    def fsync_controller_set_polarity(self, polarity: bool, output: FsyncOutput):
+
+    def fsync_controller_set_polarity(
+        self, polarity: bool, output: FsyncOutput
+    ):
+        if not self.fsync_initialised:
+            raise RuntimeError("FSYNC Controller not initialised.")
 
         if output == self.FsyncOutput.ISOLATED_STROBE:
-            output_to_set = self.FSYNC_STM_OUTPUT_3_ACTIVE_LVL
+            fw_channel = self.rp2040.FSYNC_CHANNEL_PB0_ID
+            legacy_output = self.FSYNC_STM_OUTPUT_3_ACTIVE_LVL
         elif output == self.FsyncOutput.M8_FSYNC:
-            output_to_set = self.FSYNC_STM_OUTPUT_11_ACTIVE_LVL
+            fw_channel = self.rp2040.FSYNC_CHANNEL_PA11_ID
+            legacy_output = self.FSYNC_STM_OUTPUT_11_ACTIVE_LVL
         else:
             raise ValueError("Invalid FsyncOutput")
 
-        polarity_to_set = (
-            self.FSYNC_STM_OUTPUT_ACTIVE_LVL_HIGH
-            if polarity
-            else self.FSYNC_STM_OUTPUT_ACTIVE_LVL_LOW
+        use_fw_api = (
+            self.fw_ver == 1
         )
 
-        self._fsync_stm_write(output_to_set + polarity_to_set)
+        if use_fw_api:
+            self.rp2040.fsync_set_polarity(
+                fw_channel, int(polarity)
+            )
+            return
+
+        # Generate both values here because the current file only defines
+        # FSYNC_STM_OUTPUT_ACTIVE_LVL_HIGH.
+        polarity_to_set = self._fsync_stm_bin(
+            1 if polarity else 0, 4
+        )
+
+        self._fsync_stm_write(
+            legacy_output + polarity_to_set
+        )
+
 
     def fsync_controller_input_detected(self) -> bool:
+        if not self.fsync_initialised:
+            raise RuntimeError("FSYNC Controller not initialised.")
+
+        use_fw_api = (
+            self.fw_ver == 1
+        )
+
+        if use_fw_api:
+            present, _, _ = self.rp2040.fsync_get_input_info()
+            return present
 
         present = self._fsync_stm_to_int(
-            self._fsync_stm_read(self.FSYNC_STM_IN_PRESENT_REG)
+            self._fsync_stm_read(
+                self.FSYNC_STM_IN_PRESENT_REG
+            )
         )
 
         if present == 0:
@@ -499,18 +841,47 @@ class ControllerBox:
         elif present == 1:
             return True
         else:
-            raise RuntimeError(f"Unexpected input present value: {present}")
+            raise RuntimeError(
+                f"Unexpected input present value: {present}"
+            )
+
 
     def fsync_controller_input_frequency(self) -> float:
-        return self._fsync_stm_to_float(
-            self._fsync_stm_read(self.FSYNC_STM_IN_FREQ_REG)
+        if not self.fsync_initialised:
+            raise RuntimeError("FSYNC Controller not initialised.")
+
+        use_fw_api = (
+            self.fw_ver == 1
         )
+
+        if use_fw_api:
+            _, freq, _ = self.rp2040.fsync_get_input_info()
+            return freq
+
+        return self._fsync_stm_to_float(
+            self._fsync_stm_read(
+                self.FSYNC_STM_IN_FREQ_REG
+            )
+        )
+
 
     def fsync_controller_input_duty_cycle(self) -> float:
-        return self._fsync_stm_to_float(
-            self._fsync_stm_read(self.FSYNC_STM_IN_DUTY_REG)
+        if not self.fsync_initialised:
+            raise RuntimeError("FSYNC Controller not initialised.")
+
+        use_fw_api = (
+            self.fw_ver == 1
         )
 
+        if use_fw_api:
+            _, _, duty = self.rp2040.fsync_get_input_info()
+            return 100.0 * duty / 2048.0
+
+        return self._fsync_stm_to_float(
+            self._fsync_stm_read(
+                self.FSYNC_STM_IN_DUTY_REG
+            )
+        )
 
 # ----------------------------------------------------------------
 # FSYNC register map
@@ -532,5 +903,4 @@ ControllerBox.FSYNC_STM_OUTPUT_3_DUTY_CYCLE = ControllerBox._fsync_stm_bin(0x0E,
 ControllerBox.FSYNC_STM_OUTPUT_3_ACTIVE_LVL = ControllerBox._fsync_stm_bin(0x0F, 1)
 ControllerBox.FSYNC_STM_OUTPUT_11_DUTY_CYCLE = ControllerBox._fsync_stm_bin(0x1E, 1)
 ControllerBox.FSYNC_STM_OUTPUT_11_ACTIVE_LVL = ControllerBox._fsync_stm_bin(0x1F, 1)
-ControllerBox.FSYNC_STM_OUTPUT_ACTIVE_LVL_LOW = ControllerBox._fsync_stm_bin(0x00, 4)
 ControllerBox.FSYNC_STM_OUTPUT_ACTIVE_LVL_HIGH = ControllerBox._fsync_stm_bin(0x01, 4)
