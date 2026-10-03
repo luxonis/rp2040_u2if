@@ -18,6 +18,8 @@
 #define SL6945_1V8      8
 #define MD6976_R2       9
 #define SL69008_1V8     10
+#define SL6925_1V8      11
+#define SL6925_3V3      12
 
 #define BOARD ${BOARD}
 
@@ -309,6 +311,33 @@
   
   // PWM
   #define PWM_ENABLED 1
+
+
+#elif BOARD == SL6925_1V8
+  // I2C0
+  #define I2C0_ENABLED 1
+  #define U2IF_I2C0_SDA 24
+  #define U2IF_I2C0_SCL 25
+
+  // SPI0
+  #define SPI0_ENABLED 0
+  #define U2IF_SPI0_CK 6
+  #define U2IF_SPI0_MOSI 3
+  #define U2IF_SPI0_MISO 4
+
+  // SPI1
+  #define SPI1_ENABLED 1
+  #define U2IF_SPI1_CK 10
+  #define U2IF_SPI1_MOSI 11
+  #define U2IF_SPI1_MISO 12
+  
+  // PWM
+  #define PWM_ENABLED 1
+#elif BOARD == SL6925_3V3
+  // I2C0
+  #define I2C0_ENABLED 1
+  #define U2IF_I2C0_SDA 24
+  #define U2IF_I2C0_SCL 25
 #else
   #warning "Please define board type"
 #endif

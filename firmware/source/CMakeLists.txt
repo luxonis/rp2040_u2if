@@ -42,7 +42,7 @@ project(${BUILD_NAME} VERSION "0.6.0")
 pico_sdk_init()
 
 set(BOARD "CUSTOM" CACHE STRING "BaseName chosen by the user at CMake configure time")
-set_property(CACHE BOARD PROPERTY STRINGS PICO FEATHER ITSYBITSY QTPY QT2040_TRINKEY MD6976)
+set_property(CACHE BOARD PROPERTY STRINGS PICO FEATHER ITSYBITSY QTPY QT2040_TRINKEY SL6945_1V8 MD6976_R2 SL69008_1V8 SL6925_1V8 SL6925_3V3)
 message(STATUS "Selected board:'${BOARD}'")
 
 # might help for feather?
@@ -98,8 +98,8 @@ pico_generate_pio_header(${BUILD_NAME} ${CMAKE_CURRENT_LIST_DIR}/interfaces/ws28
 pico_generate_pio_header(${BUILD_NAME} ${CMAKE_CURRENT_LIST_DIR}/interfaces/audio_i2s.pio OUTPUT_DIR ${CMAKE_CURRENT_LIST_DIR}/interfaces/)
 pico_generate_pio_header(${BUILD_NAME} ${CMAKE_CURRENT_LIST_DIR}/interfaces/hub75.pio OUTPUT_DIR ${CMAKE_CURRENT_LIST_DIR}/interfaces/)
 
-target_include_directories(${BUILD_NAME} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 target_include_directories(${BUILD_NAME} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/include")
+target_include_directories(${BUILD_NAME} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 
 target_link_libraries(${BUILD_NAME} PRIVATE pico_stdlib pico_unique_id tinyusb_device tinyusb_board
 hardware_i2c hardware_watchdog hardware_pwm hardware_adc hardware_spi
