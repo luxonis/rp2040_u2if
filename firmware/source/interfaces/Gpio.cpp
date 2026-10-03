@@ -94,19 +94,24 @@ Gpio::Gpio() {
     setInterfaceState(InterfaceState::INTIALIZED);
     critical_section_init(&critSec);
 
+#if I2C1_ENABLED && (defined(PCA9555_0_ENABLED) || defined(PCA9555_1_ENABLED))
     // the pca expanders live on i2c bus 1
     i2c_init(i2c1, 100 * 1000);
     gpio_set_function(U2IF_I2C1_SDA, GPIO_FUNC_I2C);
     gpio_set_function(U2IF_I2C1_SCL, GPIO_FUNC_I2C);
     gpio_pull_up(U2IF_I2C1_SDA);
     gpio_pull_up(U2IF_I2C1_SCL);
+#endif
 
+#if I2C0_ENABLED
     i2c_init(i2c0, 100 * 1000);
     gpio_set_function(U2IF_I2C0_SDA, GPIO_FUNC_I2C);
     gpio_set_function(U2IF_I2C0_SCL, GPIO_FUNC_I2C);
     gpio_pull_up(U2IF_I2C0_SDA);
     gpio_pull_up(U2IF_I2C0_SCL);
+#endif
 
+#if defined(PCA9555_0_ENABLED) || defined(PCA9555_1_ENABLED)
     // the hardware team made an oopsie woopsie, it lives on one of the two addresses
     uint8_t pca9555_1_addr = PCA9555_1_I2C_ADDRESS;
    
@@ -115,6 +120,7 @@ Gpio::Gpio() {
 
     exp0.init(i2c1, PCA9555_0_I2C_ADDRESS, PCA9555_0_INT_GPIO);
     exp1.init(i2c1, pca9555_1_addr, PCA9555_1_INT_GPIO);
+#endif
 
     add_repeating_timer_us(-DEBOUNCE_PERIODS_MS * 1000, debounceInput, NULL, &_debounceTimer);
 }
@@ -122,6 +128,7 @@ Gpio::Gpio() {
 Gpio::~Gpio() {
 }
 
+#if defined(PCA9555_0_ENABLED) || defined(PCA9555_1_ENABLED)
 bool Gpio::pca9555Exists(i2c_inst_t *i2c, uint8_t address) {
     constexpr uint8_t inputPort0Register = 0x00;
     uint8_t value = 0;
@@ -152,6 +159,7 @@ bool Gpio::pca9555Exists(i2c_inst_t *i2c, uint8_t address) {
 
     return readResult == 1;
 }
+#endif
 
 CmdStatus Gpio::process(uint8_t const *cmd, uint8_t response[64]) {
     CmdStatus status = CmdStatus::NOT_CONCERNED;

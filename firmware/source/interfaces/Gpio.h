@@ -26,7 +26,9 @@ protected:
 private:
     repeating_timer_t _debounceTimer;
 
+#if defined(PCA9555_0_ENABLED) || defined(PCA9555_1_ENABLED)
     bool pca9555Exists(i2c_inst_t *i2c, uint8_t address);
+#endif
     CmdStatus initPinGpio(uint8_t const *cmd);
     CmdStatus initPinExp(uint8_t const *cmd);
     CmdStatus setPinGpio(uint8_t const *cmd);
