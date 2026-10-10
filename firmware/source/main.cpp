@@ -27,6 +27,10 @@ extern "C" {
 #include "interfaces/GroupGpio.h"
 #include "interfaces/FsyncController.h"
 
+#ifdef PICO_1V8
+#include "hardware/structs/iobank0.h"
+#include "hardware/structs/pads_qspi.h"
+#endif
 
 void sendOrSaveResponse(uint8_t response[64]);
 void sendSavedResponses();
@@ -131,6 +135,15 @@ static std::vector<BaseInterface*> interfaces = {
 static queue_t tx_report_queue;
 static const uint TX_REPORT_QUEUE_SIZE = 20;
 
+#ifdef PICO_1V8
+void voltage_select_1v8()
+{
+    io_rw_32 pads_bank0_voltage_select_addr = PADS_BANK0_BASE;
+    io_rw_32 qspi_voltage_select_addr = PADS_QSPI_BASE;
+    hw_set_bits(&padsbank0_hw->voltage_select, 0x1);
+    hw_set_bits(&pads_qspi_hw->voltage_select, 0x1);
+}
+#endif
 //--------------------------------------------------------------------+
 // Main loop function
 //--------------------------------------------------------------------+
@@ -139,6 +152,9 @@ int main(void) {
     stdio_init_all();
 #endif
 
+#ifdef PICO_1V8
+    voltage_select_1v8();
+#endif
     modeActivity.init();
 
     queue_init(&tx_report_queue, HID_RESPONSE_SIZE, TX_REPORT_QUEUE_SIZE);
