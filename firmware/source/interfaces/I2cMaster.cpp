@@ -80,19 +80,22 @@ CmdStatus I2CMaster::task(uint8_t response[64]) {
 
 /*
  * cmd[2:6] = baudrate
- * cmd[6:10] = sda pin
- * cmd[10:14] = scl pin
+ * cmd[6:10] = sda pin (only when I2C_RECONFIGURABLE)
+ * cmd[10:14] = scl pin (only when I2C_RECONFIGURABLE)
  */
 CmdStatus I2CMaster::init(uint8_t const *cmd) {
     uint32_t baudrate = convertBytesToUInt32(&cmd[2]);
-    uint32_t sda = convertBytesToUInt32(&cmd[6]);
-    uint32_t scl = convertBytesToUInt32(&cmd[10]);
 
-    gpio_disable_pulls(_sdaGP);
-    gpio_disable_pulls(_sclGP);
+    #if I2C_RECONFIGURABLE
+        uint32_t sda = convertBytesToUInt32(&cmd[6]);
+        uint32_t scl = convertBytesToUInt32(&cmd[10]);
 
-    _sdaGP = sda;
-    _sclGP = scl;
+        gpio_disable_pulls(_sdaGP);
+        gpio_disable_pulls(_sclGP);
+
+        _sdaGP = sda;
+        _sclGP = scl;
+    #endif
 
     //printf("i2c baudrate %d kbaud %d %d %d\n", baudrate, report[2], report[3], sizeof(int));
     i2c_init(_i2cInst, baudrate);

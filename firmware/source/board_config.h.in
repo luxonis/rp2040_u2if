@@ -252,6 +252,7 @@
   #define HUB75_ENABLED  HUB75_ALLOW
 
 #elif BOARD == MD6976
+  #define I2C_RECONFIGURABLE 1
   // I2C0
   #define I2C0_ENABLED 1
   #define U2IF_I2C0_SDA 28
@@ -314,6 +315,10 @@
 #endif
 
 // Disable not used interfaces and their pins
+#ifndef I2C_RECONFIGURABLE
+#define I2C_RECONFIGURABLE 0
+#endif
+
 #ifndef I2C0_ENABLED
 #define I2C0_ENABLED    0
 #define U2IF_I2C0_SDA   99
